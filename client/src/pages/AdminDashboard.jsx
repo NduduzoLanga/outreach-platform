@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { AlertTriangle, CheckCircle, DollarSign, Shield, Target, Users, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle, DollarSign, Target, Users, XCircle } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import InstitutionalHero from '../components/InstitutionalHero';
 import API from '../services/api';
 
 const ROLES = ['consultant', 'specialist', 'admin'];
@@ -21,7 +22,7 @@ function MetricCard({ label, value, detail, Icon, tone }) {
         <p className={`mt-1 text-2xl font-extrabold ${tone || 'text-slate-800'}`}>{value}</p>
         {detail && <p className="mt-1 text-xs text-slate-500">{detail}</p>}
       </div>
-      <Icon aria-hidden="true" className={tone || 'text-blue-500'} size={30} />
+      <Icon aria-hidden="true" className={tone || 'text-institute-forest'} size={30} />
     </article>
   );
 }
@@ -33,6 +34,9 @@ export default function AdminDashboard() {
   const [error, setError] = useState('');
   const [busyKey, setBusyKey] = useState('');
   const [notice, setNotice] = useState('');
+  const [inviteForm, setInviteForm] = useState({ firstName: '', lastName: '', email: '', phone: '', role: 'consultant' });
+  const [inviteResult, setInviteResult] = useState(null);
+  const [copiedInvite, setCopiedInvite] = useState(false);
 
   const adminQuery = useQuery({
     queryKey: ['admin-dashboard'],
@@ -77,6 +81,52 @@ export default function AdminDashboard() {
     }
   }
 
+  async function createInvitation(event) {
+    event.preventDefault();
+    setBusyKey('create-invitation');
+    setError('');
+    setNotice('');
+    setInviteResult(null);
+    try {
+      const { data } = await API.post('/admin/users/invitations', inviteForm);
+      setInviteResult(data);
+      setNotice(data.message);
+      setInviteForm({ firstName: '', lastName: '', email: '', phone: '', role: 'consultant' });
+      await fetchAdminData();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Could not create this account invitation.');
+    } finally {
+      setBusyKey('');
+    }
+  }
+
+  async function resendInvitation(userId) {
+    setBusyKey(`invite-${userId}`);
+    setError('');
+    setNotice('');
+    setInviteResult(null);
+    try {
+      const { data } = await API.post(`/admin/users/${userId}/resend-invitation`);
+      setInviteResult(data);
+      setNotice(data.message);
+      await fetchAdminData();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Could not resend this invitation.');
+    } finally {
+      setBusyKey('');
+    }
+  }
+
+  async function copyInvitationLink() {
+    if (!inviteResult?.invitationUrl) return;
+    try {
+      await navigator.clipboard.writeText(inviteResult.invitationUrl);
+      setCopiedInvite(true);
+    } catch {
+      setError('Clipboard access was blocked. Select and copy the invitation link manually.');
+    }
+  }
+
   const pendingWithdrawals = withdrawals.filter((withdrawal) => ['Pending', 'Approved'].includes(withdrawal.status));
   const specialists = users.filter((user) => user.role === 'specialist');
   const leadStageData = ['New', 'Contacted', 'In Progress', 'Proposal Sent', 'Closed Won', 'Closed Lost']
@@ -89,13 +139,10 @@ export default function AdminDashboard() {
 
   return (
     <section className="mx-auto max-w-7xl space-y-8 p-2 sm:p-6">
-      <header className="flex items-center gap-3">
-        <Shield aria-hidden="true" className="text-blue-600" size={30} />
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">Master Admin Control Panel</h1>
-          <p className="text-sm text-slate-500">System oversight, role permissions, lead assignments, payouts, and support.</p>
-        </div>
-      </header>
+      <InstitutionalHero
+        description="System oversight, role permissions, lead assignments, payouts, and support."
+        title="Master Admin Control Panel"
+      />
 
       {(error || notice || adminQuery.error) && (
         <div
@@ -108,6 +155,11 @@ export default function AdminDashboard() {
           {(error || adminQuery.error) && <button className="font-medium underline" onClick={fetchAdminData} type="button">Retry</button>}
         </div>
       )}
+      <div className={`rounded-lg border p-3 text-sm ${health?.emailNotificationsConfigured ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
+        {health?.emailNotificationsConfigured
+          ? 'Invitation email delivery is configured. Emails contain a one-time password setup link, never a password.'
+          : 'Invitation emails are not configured. Accounts can still be invited, but securely copy and send the one-time setup link manually until SMTP is configured.'}
+      </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
         <MetricCard
@@ -135,14 +187,14 @@ export default function AdminDashboard() {
           Icon={DollarSign}
           label="Commissions Earned"
           value={`R${Number(stats?.finance?.commissionEarned || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}`}
-          tone="text-blue-600"
+          tone="text-institute-forest"
         />
         <MetricCard
           detail="Open or in-progress cases"
           Icon={AlertTriangle}
           label="Support Queue"
           value={stats?.support?.openTickets ?? 0}
-          tone="text-blue-600"
+          tone="text-institute-forest"
         />
         <MetricCard
           detail={`Database: ${health?.database || 'unknown'}`}
@@ -163,7 +215,7 @@ export default function AdminDashboard() {
                 <XAxis dataKey="stage" angle={-25} textAnchor="end" interval={0} tick={{ fontSize: 10 }} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
                 <Tooltip />
-                <Bar dataKey="count" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="count" fill="#0b5a3b" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -175,7 +227,7 @@ export default function AdminDashboard() {
               <PieChart>
                 <Pie data={roleData} dataKey="users" nameKey="name" cx="50%" cy="50%" outerRadius={88} label>
                   {roleData.map((entry, index) => (
-                    <Cell key={entry.name} fill={['#2563eb', '#7c3aed', '#059669'][index]} />
+                    <Cell key={entry.name} fill={['#0b5a3b', '#d6a72c', '#16704b'][index]} />
                   ))}
                 </Pie>
                 <Tooltip />
@@ -184,6 +236,92 @@ export default function AdminDashboard() {
           </div>
         </section>
       </div>
+
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <header className="border-b border-slate-200 bg-slate-50 px-6 py-4">
+          <h2 className="text-sm font-bold text-slate-800">Add a consultant or lead specialist</h2>
+          <p className="mt-1 text-xs text-slate-500">The invitee sets their own password using a single-use link that expires in 24 hours. Passwords are never sent by email.</p>
+        </header>
+        <form className="grid gap-4 p-5 sm:grid-cols-2 xl:grid-cols-5" onSubmit={createInvitation}>
+          <label className="block text-xs font-medium text-slate-700">
+            First name *
+            <input
+              autoComplete="given-name"
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              maxLength={60}
+              onChange={(event) => setInviteForm((current) => ({ ...current, firstName: event.target.value }))}
+              required
+              value={inviteForm.firstName}
+            />
+          </label>
+          <label className="block text-xs font-medium text-slate-700">
+            Last name *
+            <input
+              autoComplete="family-name"
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              maxLength={60}
+              onChange={(event) => setInviteForm((current) => ({ ...current, lastName: event.target.value }))}
+              required
+              value={inviteForm.lastName}
+            />
+          </label>
+          <label className="block text-xs font-medium text-slate-700">
+            Work email *
+            <input
+              autoComplete="email"
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              maxLength={254}
+              onChange={(event) => setInviteForm((current) => ({ ...current, email: event.target.value }))}
+              required
+              type="email"
+              value={inviteForm.email}
+            />
+          </label>
+          <label className="block text-xs font-medium text-slate-700">
+            Phone
+            <input
+              autoComplete="tel"
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              maxLength={32}
+              onChange={(event) => setInviteForm((current) => ({ ...current, phone: event.target.value }))}
+              value={inviteForm.phone}
+            />
+          </label>
+          <label className="block text-xs font-medium text-slate-700">
+            Portal role *
+            <select
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              onChange={(event) => setInviteForm((current) => ({ ...current, role: event.target.value }))}
+              value={inviteForm.role}
+            >
+              <option value="consultant">Outreach Consultant</option>
+              <option value="specialist">Lead Specialist</option>
+            </select>
+          </label>
+          <div className="flex items-end">
+            <button className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-institute-forest px-4 py-2.5 text-sm font-semibold text-white hover:bg-institute-deep disabled:opacity-50" disabled={busyKey === 'create-invitation'} type="submit">
+              <Users aria-hidden="true" size={16} />
+              {busyKey === 'create-invitation' ? 'Creating invite…' : 'Create and invite'}
+            </button>
+          </div>
+        </form>
+        {inviteResult && (
+          <div className={`mx-5 mb-5 rounded-lg border p-4 ${inviteResult.delivery.sent ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+            <p className="text-sm font-semibold text-slate-800">{inviteResult.message}</p>
+            {inviteResult.user && <p className="mt-1 text-xs text-slate-600">{inviteResult.user.name} · {inviteResult.user.email} · {inviteResult.user.role}</p>}
+            {inviteResult.invitationUrl && (
+              <div className="mt-3 space-y-2">
+                <label className="block text-xs font-semibold text-slate-700" htmlFor="manual-invitation-link">One-time setup link — share only with the intended invitee</label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <input className="min-w-0 flex-1 rounded border border-slate-300 bg-white px-3 py-2 text-xs" id="manual-invitation-link" readOnly value={inviteResult.invitationUrl} />
+                  <button className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50" onClick={copyInvitationLink} type="button">{copiedInvite ? 'Copied' : 'Copy link'}</button>
+                </div>
+                <p className="text-xs text-amber-900">Link expires at {new Date(inviteResult.user?.invitationExpiresAt || Date.now() + 24 * 60 * 60 * 1000).toLocaleString()} and can only be used once.</p>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
 
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <header className="border-b border-slate-200 bg-slate-50 px-6 py-4">
@@ -246,7 +384,7 @@ export default function AdminDashboard() {
                     <td className="space-x-2 p-4 text-right">
                       {withdrawal.status === 'Pending' ? (
                         <button
-                          className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                          className="rounded bg-institute-forest px-3 py-1.5 text-xs font-medium text-white hover:bg-institute-deep disabled:opacity-50"
                           disabled={busyKey === withdrawal._id}
                           onClick={() => runAction(withdrawal._id, () => API.put(`/admin/withdrawals/${withdrawal._id}/status`, { status: 'Approved' }), 'Payout approved.')}
                           type="button"
@@ -291,7 +429,7 @@ export default function AdminDashboard() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="border-b border-slate-200 bg-slate-100 text-xs uppercase text-slate-600">
-                <tr><th className="p-4">User</th><th className="p-4">Email</th><th className="p-4">Role</th></tr>
+                <tr><th className="p-4">User</th><th className="p-4">Email</th><th className="p-4">Role</th><th className="p-4">Account status</th><th className="p-4">Onboarding actions</th></tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
                 {users.map((user) => (
@@ -314,6 +452,40 @@ export default function AdminDashboard() {
                       >
                         {ROLES.map((role) => <option key={role} value={role}>{role}</option>)}
                       </select>
+                    </td>
+                    <td className="p-4">
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${user.accountStatus === 'active' ? 'bg-emerald-100 text-emerald-800' : user.accountStatus === 'suspended' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-900'}`}>
+                        {(user.accountStatus || 'active').replaceAll('_', ' ')}
+                      </span>
+                      {user.invitedAt && user.accountStatus === 'pending_invitation' && <p className="mt-1 text-[11px] text-slate-500">Invited {new Date(user.invitedAt).toLocaleDateString()}</p>}
+                    </td>
+                    <td className="space-x-2 p-4">
+                      {(user.accountStatus === 'pending_invitation' || (user.accountStatus === 'suspended' && user.invitedAt && !user.passwordChangedAt)) && (
+                        <button
+                          className="rounded border border-institute-forest/25 px-2.5 py-1.5 text-xs font-semibold text-institute-forest hover:bg-institute-paper disabled:opacity-50"
+                          disabled={busyKey === `invite-${user._id}`}
+                          onClick={() => resendInvitation(user._id)}
+                          type="button"
+                        >
+                          {busyKey === `invite-${user._id}` ? 'Sending…' : 'Resend invite'}
+                        </button>
+                      )}
+                      {user.role !== 'admin'
+                        && user.accountStatus !== 'pending_invitation'
+                        && !(user.accountStatus === 'suspended' && user.invitedAt && !user.passwordChangedAt) && (
+                        <button
+                          className={`rounded border px-2.5 py-1.5 text-xs font-semibold disabled:opacity-50 ${user.accountStatus === 'suspended' ? 'border-emerald-200 text-emerald-800 hover:bg-emerald-50' : 'border-rose-200 text-rose-800 hover:bg-rose-50'}`}
+                          disabled={busyKey === `status-${user._id}`}
+                          onClick={() => runAction(
+                            `status-${user._id}`,
+                            () => API.patch(`/admin/users/${user._id}/status`, { accountStatus: user.accountStatus === 'suspended' ? 'active' : 'suspended' }),
+                            `${user.name}'s account status updated.`
+                          )}
+                          type="button"
+                        >
+                          {user.accountStatus === 'suspended' ? 'Reactivate' : 'Suspend'}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -462,7 +634,7 @@ export default function AdminDashboard() {
                     value={ticketReplies[ticket._id] || ''}
                   />
                   <button
-                    className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                    className="rounded-lg bg-institute-forest px-3 py-2 text-sm font-medium text-white hover:bg-institute-deep disabled:opacity-50"
                     disabled={busyKey === `ticket-reply-${ticket._id}` || !(ticketReplies[ticket._id] || '').trim()}
                     type="submit"
                   >
@@ -497,7 +669,7 @@ export default function AdminDashboard() {
                     <td className="p-3 text-xs text-slate-600">{entry.resourceType} · {String(entry.resourceId).slice(-8)}</td>
                     <td className="max-w-sm p-3 text-xs">
                       <details>
-                        <summary className="cursor-pointer text-blue-700">View changes</summary>
+                        <summary className="cursor-pointer text-institute-forest">View changes</summary>
                         <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-50 p-2 text-[10px] text-slate-600">
                           {JSON.stringify({ before: entry.before, after: entry.after }, null, 2)}
                         </pre>

@@ -15,7 +15,7 @@ async function promoteAdmin() {
   await connectMongo({ allowLocalDefault: false });
   const user = await User.findOne({ email }).select('name email role tenantId');
   if (!user) {
-    throw new Error(`No account found for ${email}. Register that account before promoting it.`);
+    throw new Error(`No account found for ${email}. Provision the first account through a trusted deployment process before promoting it.`);
   }
   if (!user.tenantId) {
     throw new Error('The account has no agency assignment. Start the API once to run tenant migration before promoting it.');

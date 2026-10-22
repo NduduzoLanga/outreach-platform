@@ -1,66 +1,17 @@
 const User = require('../models/User');
-const Agency = require('../models/Agency');
 const jwt = require('jsonwebtoken');
+const { tenantContext } = require('../security/tenantContext');
 const { runInTransaction } = require('../services/transactionService');
 const { writeAuditLog } = require('../services/auditService');
 const { respondWithControllerError } = require('../middleware/controllerError');
+const { hashInvitationToken } = require('../services/invitationService');
+const { splitFullName } = require('../services/userName');
 
 const generateToken = (id) => {
   if (!process.env.JWT_SECRET) {
     throw new Error('JWT_SECRET is required');
   }
   return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '30d' });
-};
-
-// @desc    Register new Outreach Consultant
-// @route   POST /api/auth/register
-const registerUser = async (req, res) => {
-  try {
-    const { name, email, password, phone } = req.body;
-
-    if (
-      typeof name !== 'string'
-      || !name.trim()
-      || typeof email !== 'string'
-      || !email.trim()
-    ) {
-      return res.status(400).json({ message: 'Please enter all required fields' });
-    }
-    if (typeof password !== 'string' || password.length < 8 || Buffer.byteLength(password, 'utf8') > 72) {
-      return res.status(400).json({ message: 'Password must be at least 8 characters and no more than 72 UTF-8 bytes.' });
-    }
-
-    const normalizedEmail = email.trim().toLowerCase();
-    const userExists = await User.findOne({ email: normalizedEmail });
-    if (userExists) {
-      return res.status(400).json({ message: 'User with this email already exists' });
-    }
-
-    const agency = await Agency.findOne({ slug: 'default', active: true });
-    if (!agency) {
-      return res.status(503).json({ message: 'The platform agency is not initialized.' });
-    }
-
-    const user = await User.create({
-      tenantId: agency._id,
-      name: name.trim(),
-      email: normalizedEmail,
-      password,
-      phone: typeof phone === 'string' ? phone.trim() : '',
-    });
-
-    return res.status(201).json({
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      balance: user.balance,
-      token: generateToken(user._id),
-    });
-  } catch (error) {
-    res.status(error.code === 11000 ? 409 : error.name === 'ValidationError' ? 400 : 500)
-      .json({ message: error.code === 11000 ? 'User with this email already exists.' : error.name === 'ValidationError' ? error.message : 'Could not register account.' });
-  }
 };
 
 // @desc    Authenticate User & Get Token
@@ -73,10 +24,12 @@ const loginUser = async (req, res) => {
     }
 
     const user = await User.findOne({ email: email.trim().toLowerCase() });
-    if (user && (await user.matchPassword(password))) {
+    if (user && user.accountStatus === 'active' && (await user.matchPassword(password))) {
       res.json({
         _id: user._id,
         name: user.name,
+        firstName: user.firstName,
+        lastName: user.lastName,
         email: user.email,
         role: user.role,
         balance: user.balance,
@@ -90,12 +43,82 @@ const loginUser = async (req, res) => {
   }
 };
 
+const acceptInvitation = async (req, res) => {
+  try {
+    const { token, password } = req.body;
+    if (typeof token !== 'string' || token.length < 32 || token.length > 256) {
+      return res.status(400).json({ message: 'Invitation link is invalid or expired. Ask an administrator to send a new invitation.' });
+    }
+    if (typeof password !== 'string' || password.length < 12 || Buffer.byteLength(password, 'utf8') > 72) {
+      return res.status(400).json({ message: 'Choose a password of at least 12 characters and no more than 72 UTF-8 bytes.' });
+    }
+
+    const tokenHash = hashInvitationToken(token);
+    const invitation = await User.findOne({
+      invitationTokenHash: tokenHash,
+      accountStatus: 'pending_invitation',
+      invitationExpiresAt: { $gt: new Date() },
+    }).select('+invitationTokenHash +invitationExpiresAt');
+    if (!invitation) {
+      return res.status(400).json({ message: 'Invitation link is invalid or expired. Ask an administrator to send a new invitation.' });
+    }
+
+    const user = await tenantContext.run(String(invitation.tenantId), () => runInTransaction(async (session) => {
+      const current = await User.findOne({
+        _id: invitation._id,
+        invitationTokenHash: tokenHash,
+        accountStatus: 'pending_invitation',
+        invitationExpiresAt: { $gt: new Date() },
+      }).select('+invitationTokenHash +invitationExpiresAt').session(session);
+      if (!current) {
+        const error = new Error('Invitation has already been used or has expired.');
+        error.statusCode = 400;
+        throw error;
+      }
+      current.password = password;
+      current.passwordChangedAt = new Date();
+      current.accountStatus = 'active';
+      current.invitationTokenHash = undefined;
+      current.invitationExpiresAt = null;
+      await current.save({ session });
+      await writeAuditLog({
+        req: { ...req, user: current },
+        action: 'user.invitation_accepted',
+        resourceType: 'User',
+        resourceId: current._id,
+        after: { accountStatus: 'active', passwordSet: true },
+        session,
+      });
+      return current;
+    }));
+
+    return res.json({
+      _id: user._id,
+      name: user.name,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      role: user.role,
+      balance: user.balance,
+      token: generateToken(user._id),
+    });
+  } catch (error) {
+    return respondWithControllerError(req, res, error);
+  }
+};
+
 // @desc    Get Current Logged in User Profile
 // @route   GET /api/auth/profile
 const getUserProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('-password');
-    res.json(user);
+    if (!user) return res.status(404).json({ message: 'User not found.' });
+    const legacyName = splitFullName(user.name);
+    return res.json({
+      ...user.toObject(),
+      firstName: user.firstName || legacyName.firstName,
+      lastName: user.lastName || legacyName.lastName,
+    });
   } catch (error) {
     return respondWithControllerError(req, res, error);
   }
@@ -133,6 +156,28 @@ const updateUserProfile = async (req, res) => {
           throw error;
         }
         currentUser.name = req.body.name.trim();
+        const legacyName = splitFullName(currentUser.name);
+        currentUser.firstName = legacyName.firstName;
+        currentUser.lastName = legacyName.lastName;
+      }
+      if (req.body.firstName !== undefined || req.body.lastName !== undefined) {
+        const existingName = splitFullName(currentUser.name);
+        const firstName = req.body.firstName ?? currentUser.firstName ?? existingName.firstName;
+        const lastName = req.body.lastName ?? currentUser.lastName ?? existingName.lastName;
+        if (
+          typeof firstName !== 'string'
+          || !firstName.trim()
+          || firstName.trim().length > 60
+          || typeof lastName !== 'string'
+          || !lastName.trim()
+          || lastName.trim().length > 60
+        ) {
+          const error = new Error('First and last names must each be between 1 and 60 characters.');
+          error.statusCode = 400;
+          throw error;
+        }
+        currentUser.firstName = firstName.trim();
+        currentUser.lastName = lastName.trim();
       }
       if (req.body.phone !== undefined) {
         if (typeof req.body.phone !== 'string' || req.body.phone.length > 32) {
@@ -167,10 +212,10 @@ const updateUserProfile = async (req, res) => {
       if (req.body.password) {
         if (
           typeof req.body.password !== 'string'
-          || req.body.password.length < 8
+          || req.body.password.length < 12
           || Buffer.byteLength(req.body.password, 'utf8') > 72
         ) {
-          const error = new Error('Password must be at least 8 characters and no more than 72 UTF-8 bytes.');
+          const error = new Error('Password must be at least 12 characters and no more than 72 UTF-8 bytes.');
           error.statusCode = 400;
           throw error;
         }
@@ -214,6 +259,8 @@ const updateUserProfile = async (req, res) => {
       return res.json({
         _id: updatedUser._id,
         name: updatedUser.name,
+        firstName: updatedUser.firstName,
+        lastName: updatedUser.lastName,
         email: updatedUser.email,
         phone: updatedUser.phone,
         role: updatedUser.role,
@@ -225,4 +272,4 @@ const updateUserProfile = async (req, res) => {
   }
 };
 
-module.exports = { registerUser, loginUser, getUserProfile, updateUserProfile };
+module.exports = { loginUser, acceptInvitation, getUserProfile, updateUserProfile };

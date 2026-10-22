@@ -7,13 +7,14 @@ import { useAuth } from '../context/AuthContext';
 import API from '../services/api';
 
 const profileSchema = z.object({
-  name: z.string().trim().min(1, 'Name is required.'),
+  firstName: z.string().trim().min(1, 'First name is required.').max(60, 'First name must be 60 characters or fewer.'),
+  lastName: z.string().trim().min(1, 'Last name is required.').max(60, 'Last name must be 60 characters or fewer.'),
   phone: z.string().trim().max(32).regex(/^[+()\d\s.-]*$/, 'Use a valid phone number format.'),
   accountHolder: z.string().trim(),
   bankName: z.string().trim(),
   accountNumber: z.string().trim().max(40).regex(/^[\d\s-]*$/, 'Use digits only for the account number.'),
   branchCode: z.string().trim().max(20).regex(/^[\d\s-]*$/, 'Use digits only for the branch code.'),
-  password: z.union([z.literal(''), z.string().min(8, 'Password must be at least 8 characters.').max(72, 'Password must be 72 characters or fewer.')]),
+  password: z.union([z.literal(''), z.string().min(12, 'Password must be at least 12 characters.').max(72, 'Password must be 72 characters or fewer.')]),
 });
 
 export default function Profile() {
@@ -27,7 +28,8 @@ export default function Profile() {
   } = useForm({
     resolver: zodResolver(profileSchema),
     defaultValues: {
-      name: '',
+      firstName: '',
+      lastName: '',
       phone: '',
       accountHolder: '',
       bankName: '',
@@ -39,7 +41,8 @@ export default function Profile() {
 
   useEffect(() => {
     reset({
-      name: user?.name || '',
+      firstName: user?.firstName || user?.name?.trim().split(/\s+/)[0] || '',
+      lastName: user?.lastName || user?.name?.trim().split(/\s+/).slice(1).join(' ') || '',
       phone: user?.phone || '',
       accountHolder: user?.bankDetails?.accountHolder || '',
       bankName: user?.bankDetails?.bankName || '',
@@ -52,7 +55,8 @@ export default function Profile() {
   const updateProfile = useMutation({
     mutationFn: async (form) => {
       const payload = {
-        name: form.name,
+        firstName: form.firstName,
+        lastName: form.lastName,
         phone: form.phone,
         bankDetails: {
           accountHolder: form.accountHolder,
@@ -101,13 +105,24 @@ export default function Profile() {
           <legend className="text-lg font-semibold text-slate-800">Personal details</legend>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block text-sm font-medium text-slate-700">
-              Full name
+              First name
               <input
-                autoComplete="name"
+                autoComplete="given-name"
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
-                {...register('name')}
+                maxLength={60}
+                {...register('firstName')}
               />
-              {errors.name && <span className="mt-1 block text-xs text-rose-600">{errors.name.message}</span>}
+              {errors.firstName && <span className="mt-1 block text-xs text-rose-600">{errors.firstName.message}</span>}
+            </label>
+            <label className="block text-sm font-medium text-slate-700">
+              Last name
+              <input
+                autoComplete="family-name"
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                maxLength={60}
+                {...register('lastName')}
+              />
+              {errors.lastName && <span className="mt-1 block text-xs text-rose-600">{errors.lastName.message}</span>}
             </label>
             <label className="block text-sm font-medium text-slate-700">
               Email

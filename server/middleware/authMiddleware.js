@@ -16,6 +16,9 @@ const protect = async (req, res, next) => {
       if (!req.user) {
         return res.status(401).json({ message: 'User not found' });
       }
+      if (req.user.accountStatus !== 'active') {
+        return res.status(403).json({ message: 'Your account is not active. Complete your invitation or contact an administrator.' });
+      }
 
       return next();
     } catch (error) {

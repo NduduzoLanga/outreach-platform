@@ -2,6 +2,9 @@ const express = require('express');
 const {
   getAdminStats,
   getUsers,
+  createUserInvitation,
+  resendUserInvitation,
+  updateUserStatus,
   getAuditLogs,
   updateUserRole,
   processWithdrawal,
@@ -19,6 +22,9 @@ const router = express.Router();
 router.use(protect, bindTenant, authorize('admin'));
 router.get('/stats', getAdminStats);
 router.get('/users', getUsers);
+router.post('/users/invitations', createUserInvitation);
+router.post('/users/:id/resend-invitation', resendUserInvitation);
+router.patch('/users/:id/status', updateUserStatus);
 router.get('/audit-logs', getAuditLogs);
 router.put('/users/:id/role', updateUserRole);
 router.put('/withdrawals/:id/status', processWithdrawal);

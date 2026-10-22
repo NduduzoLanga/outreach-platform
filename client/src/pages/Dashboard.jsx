@@ -1,6 +1,7 @@
 import { Link, Navigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
+import InstitutionalHero from '../components/InstitutionalHero';
 import StatCard from '../components/StatCard';
 import API from '../services/api';
 
@@ -41,19 +42,18 @@ export default function Dashboard() {
     (total, lead) => total + Number(lead.estimatedValue || 0) * Number(lead.conversionProbability ?? 10) / 100,
     0
   );
+  const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.name || '';
 
   return (
     <section className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">
-          {isSpecialist ? `Welcome to your lead queue${user?.name ? `, ${user.name}` : ''}` : `Welcome${user?.name ? `, ${user.name}` : ''}`}
-        </h1>
-        <p className="mt-2 text-slate-600">
-          {isSpecialist
-            ? 'Claim unassigned leads, manage your assigned pipeline, and take deals through closure.'
-            : 'Capture client leads, track specialist progress, and request payouts from your available balance.'}
-        </p>
-      </header>
+      <InstitutionalHero
+        description={isSpecialist
+          ? 'Claim unassigned leads, guide early learning centres through your pipeline, and move opportunities toward successful closure.'
+          : 'Build trusted relationships with early learning centres, follow every referral, and manage your earnings in one place.'}
+        title={isSpecialist
+          ? `Welcome to your lead queue${fullName ? `, ${fullName}` : ''}`
+          : `Welcome${fullName ? `, ${fullName}` : ''}`}
+      />
 
       {dashboardQuery.error && <p className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700" role="alert">{dashboardQuery.error.response?.data?.message || 'Could not load dashboard activity.'}</p>}
       {dashboardQuery.isLoading ? (
@@ -86,18 +86,18 @@ export default function Dashboard() {
         </div>
       )}
 
-      <section className="rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="font-semibold text-slate-800">{isSpecialist ? 'Next steps' : 'Quick actions'}</h2>
+      <section className="rounded-xl border border-institute-forest/10 bg-white p-5 shadow-[0_3px_14px_rgba(6,60,43,0.04)]">
+        <h2 className="font-semibold text-institute-deep">{isSpecialist ? 'Next steps' : 'Quick actions'}</h2>
         <div className="mt-4 flex flex-wrap gap-3">
-          <Link className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700" to="/leads">
+          <Link className="rounded-lg bg-institute-forest px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-institute-deep focus:outline-none focus:ring-2 focus:ring-institute-gold focus:ring-offset-2" to="/leads">
             {isSpecialist ? 'Open lead work queue' : 'Capture or review leads'}
           </Link>
           {!isSpecialist && (
-            <Link className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50" to="/withdrawals">
+            <Link className="rounded-lg border border-institute-forest/25 px-4 py-2 text-sm font-medium text-institute-forest transition hover:border-institute-gold hover:bg-institute-paper focus:outline-none focus:ring-2 focus:ring-institute-gold focus:ring-offset-2" to="/withdrawals">
               Request a payout
             </Link>
           )}
-          <Link className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50" to="/support">
+          <Link className="rounded-lg border border-institute-forest/25 px-4 py-2 text-sm font-medium text-institute-forest transition hover:border-institute-gold hover:bg-institute-paper focus:outline-none focus:ring-2 focus:ring-institute-gold focus:ring-offset-2" to="/support">
             Contact support
           </Link>
         </div>

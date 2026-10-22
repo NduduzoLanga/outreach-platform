@@ -9,19 +9,19 @@ Role-based lead, payout, and support workspaces built with Express, MongoDB, Rea
 
 ## Run locally
 
+From the repository root, run `npm test` for backend tests, `npm run build` for a frontend production build, or `npm run verify` for both.
+
 1. Configure `server/.env` from `server/.env.example`. Use a MongoDB Atlas deployment or a local MongoDB replica set: financial, profile, and audit operations use multi-document transactions. The default local URI expects replica set `rs0`; start local `mongod` with `--replSet rs0` and initialize it once with `mongosh --eval "rs.initiate()"`.
 2. Set a unique `JWT_SECRET` of at least 32 characters and `CLIENT_ORIGIN` to the frontend origin.
 3. From `server/`, run `npm install` and `npm run dev`.
 4. Configure `client/.env` from `client/.env.example`. From `client/`, run `npm install` and `npm run dev`.
-5. Create an initial admin by registering an account and promoting it with `npm run promote-admin -- <email>` from `server/`, or use the explicitly configured demo seeder below for a development workspace.
+5. For a new deployment only, temporarily set `BOOTSTRAP_ADMIN_NAME`, `BOOTSTRAP_ADMIN_EMAIL`, and a strong `BOOTSTRAP_ADMIN_PASSWORD` in the server environment, run `npm run bootstrap-admin` from `server/`, then remove those variables immediately. The command refuses to run if an admin or matching account already exists. Thereafter, administrators create consultant and specialist accounts from the Admin Control Panel; public self-registration is disabled. Use `npm run promote-admin -- <email>` only to promote an already-provisioned account.
 
 The API creates a default agency during startup and assigns existing records that have no tenant ID to it. Back up the database before deploying this migration.
 
 Run `npm run init-db` from `server/` after configuring `MONGODB_URI` (or `MONGO_URI`) to create collections and the indexes declared by the Mongoose schemas. If Node.js is using a broken local DNS stub for Atlas SRV records, configure `MONGODB_DNS_SERVERS` with a comma-separated list of reachable DNS resolver IPs; this changes the resolver for that Node process. The application can also use `MONGODB_DIRECT_URI` as a fallback when SRV lookup fails with `querySrv ECONNREFUSED`; use only the exact seed list and replica-set name supplied by Atlas. The initializer does not drop or replace existing indexes; index conflicts, including duplicate values that violate a unique index, are reported as errors. Use the same Atlas or replica-set deployment required by transactional API operations.
 
-### Explicit demo seeding
-
-The optional seeder creates or verifies one admin, specialist, and consultant plus three fictional sample leads. It does not reset existing balances, overwrite passwords, or create sample payout requests. Configure `SEED_DEMO_DATA=true` and set distinct `SEED_ADMIN_*`, `SEED_SPECIALIST_*`, and `SEED_CONSULTANT_*` credentials in `server/.env`; use unique passwords of at least 12 characters. Then run `npm run seed` from `server/`. The sample lead emails use the reserved `.example` domain. Set `SEED_DEMO_DATA=false` again when seeding is complete.
+Invitation emails are sent from `Azania Paragon Institute <hr@azania-paragon.institute>`. Configure the organization's authorized SMTP relay in `server/.env` using `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, and (if required by that relay) `SMTP_USER` and `SMTP_PASSWORD`; the example uses the HR mailbox as the SMTP username. The relay must authorize this sender address. Set `CLIENT_APP_URL` to the frontend origin for invitation links. Without valid relay settings, the admin panel displays a single-use setup link for secure manual delivery. Links expire after 24 hours; invitees set their own password, and credentials are never emailed. Admin invitations require separate first and last names, which populate personalized dashboard greetings and remain editable in the user's profile.
 
 The admin sidebar includes an audit trail with action filters, search, before/after state inspection, and cursor-based loading of older entries.
 

@@ -1,0 +1,22 @@
+{
+  "name": "outreach-platform",
+  "version": "1.0.0",
+  "description": "Role-based lead, payout, and support workspaces built with Express, MongoDB, React, and Vite.",
+  "homepage": "https://github.com/NduduzoLanga/outreach-platform#readme",
+  "bugs": {
+    "url": "https://github.com/NduduzoLanga/outreach-platform/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NduduzoLanga/outreach-platform.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "npm --prefix server test",
+    "build": "npm --prefix client run build",
+    "verify": "npm test && npm run build"
+  }
+}

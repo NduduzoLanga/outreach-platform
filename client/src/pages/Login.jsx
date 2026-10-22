@@ -76,9 +76,9 @@ export default function Login() {
           </button>
         </form>
         <p className="mt-6 text-center text-sm text-slate-600">
-          Need an account?{' '}
+          Have an invitation?{' '}
           <Link to="/register" className="font-semibold text-emerald-800 hover:text-emerald-950 hover:underline">
-            Register here
+            Learn how to join
           </Link>
         </p>
       </section>

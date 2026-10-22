@@ -136,7 +136,7 @@ export default function Statements() {
         </div>
       </header>
 
-      <article className="space-y-8 rounded-xl border border-slate-200 bg-white p-6 shadow-sm print:border-none print:p-0 print:shadow-none sm:p-8">
+      <article id="statement-print-root" className="space-y-8 rounded-xl border border-slate-200 bg-white p-6 shadow-sm print:border-none print:p-0 print:shadow-none sm:p-8">
         <header className="flex items-start justify-between border-b border-slate-200 pb-6">
           <div className="flex items-center gap-3">
             <FileText aria-hidden="true" className="text-blue-600" size={28} />

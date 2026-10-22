@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
 const AuditLogs = lazy(() => import("./pages/AuditLogs"));
+const AcceptInvitation = lazy(() => import("./pages/AcceptInvitation"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Leads = lazy(() => import("./pages/Leads"));
 const Login = lazy(() => import("./pages/Login"));
@@ -30,7 +31,7 @@ class PageErrorBoundary extends Component {
         <div className="mx-auto max-w-xl rounded-xl border border-rose-200 bg-white p-8 text-center" role="alert">
           <h1 className="text-lg font-semibold text-slate-900">This page could not be loaded</h1>
           <p className="mt-2 text-sm text-slate-600">{this.state.error.message}</p>
-          <button className="mt-5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white" onClick={() => window.location.reload()} type="button">
+          <button className="mt-5 rounded-lg bg-institute-forest px-4 py-2 text-sm font-medium text-white hover:bg-institute-deep" onClick={() => window.location.reload()} type="button">
             Reload page
           </button>
         </div>
@@ -55,6 +56,7 @@ function Workspace() {
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
+              <Route path="/accept-invite" element={<AcceptInvitation />} />
               <Route element={<ProtectedRoute />}>
                 <Route path="/" element={<Navigate to="/dashboard" replace />} />
                 <Route path="/dashboard" element={<Dashboard />} />
@@ -83,7 +85,7 @@ function AppLayout() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <div className="min-h-screen bg-slate-50">
+        <div className="min-h-screen bg-institute-paper">
           <Navbar />
           <Workspace />
         </div>

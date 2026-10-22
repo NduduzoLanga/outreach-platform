@@ -8,6 +8,7 @@ const { rateLimit } = require('express-rate-limit');
 const { randomUUID } = require('node:crypto');
 const connectDB = require('./config/db');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
+const { isEmailDeliveryConfigured } = require('./services/invitationService');
 
 dotenv.config({ path: path.resolve(__dirname, '.env') });
 
@@ -58,6 +59,7 @@ app.get('/api/health', (req, res) => {
   res.status(statusCode).json({
     status: databaseConnected ? 'operational' : 'degraded',
     database: databaseConnected ? 'connected' : 'unavailable',
+    emailNotificationsConfigured: isEmailDeliveryConfigured(),
   });
 });
 app.use(notFound);

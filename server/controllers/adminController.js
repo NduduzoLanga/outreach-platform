@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { randomBytes } = require('node:crypto');
 const User = require('../models/User');
 const Lead = require('../models/Lead');
 const Withdrawal = require('../models/Withdrawal');
@@ -10,7 +11,9 @@ const { writeAuditLog } = require('../services/auditService');
 const { runInTransaction } = require('../services/transactionService');
 const { toCurrency } = require('../services/money');
 const { COMMISSION_PACKAGES } = require('../services/commissionPackages');
+const { createInvitationToken, getInvitationUrl, sendInvitationEmail } = require('../services/invitationService');
 const { respondWithControllerError } = require('../middleware/controllerError');
+const { combineName, splitFullName } = require('../services/userName');
 
 const getAdminStats = async (req, res) => {
   try {
@@ -62,8 +65,238 @@ const getAdminStats = async (req, res) => {
 
 const getUsers = async (req, res) => {
   try {
-    const users = await User.find().select('name email role createdAt').sort({ createdAt: -1 });
-    return res.json(users);
+    const users = await User.find()
+      .select('name firstName lastName email role accountStatus invitedAt invitedBy passwordChangedAt createdAt')
+      .populate('invitedBy', 'name email')
+      .sort({ createdAt: -1 });
+    return res.json(users.map((user) => {
+      const legacyName = splitFullName(user.name);
+      return {
+        ...user.toObject(),
+        firstName: user.firstName || legacyName.firstName,
+        lastName: user.lastName || legacyName.lastName,
+      };
+    }));
+  } catch (error) {
+    return respondWithControllerError(req, res, error);
+  }
+};
+
+async function recordInvitationDelivery(req, userId, delivery) {
+  await runInTransaction(async (session) => {
+    await writeAuditLog({
+      req,
+      action: delivery.sent ? 'user.invitation_email_sent' : 'user.invitation_email_not_sent',
+      resourceType: 'User',
+      resourceId: userId,
+      after: { deliveryStatus: delivery.sent ? 'sent_to_mail_provider' : delivery.reason },
+      session,
+    });
+  });
+}
+
+async function deliverInvitation(req, user, token) {
+  let delivery;
+  try {
+    delivery = await sendInvitationEmail({
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      invitationUrl: getInvitationUrl(token),
+      invitedBy: req.user.name,
+    });
+  } catch (error) {
+    console.error('Invitation email delivery failed:', error);
+    delivery = { sent: false, reason: 'delivery_failed' };
+  }
+  await recordInvitationDelivery(req, user._id, delivery);
+  return {
+    delivery,
+    ...(delivery.sent ? {} : { invitationUrl: getInvitationUrl(token) }),
+  };
+}
+
+const createUserInvitation = async (req, res) => {
+  try {
+    const { email, role, phone = '' } = req.body;
+    const legacyName = typeof req.body.name === 'string' ? splitFullName(req.body.name) : null;
+    const firstNameInput = req.body.firstName ?? legacyName?.firstName;
+    const lastNameInput = req.body.lastName ?? legacyName?.lastName;
+    const firstName = typeof firstNameInput === 'string' ? firstNameInput.trim() : '';
+    const lastName = typeof lastNameInput === 'string' ? lastNameInput.trim() : '';
+    if (!firstName || firstName.length > 60 || !lastName || lastName.length > 60) {
+      return res.status(400).json({ message: 'First and last name are required and must be 60 characters or fewer.' });
+    }
+    const name = combineName(firstName, lastName);
+    if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.trim().length > 254) {
+      return res.status(400).json({ message: 'Enter a valid email address.' });
+    }
+    if (!['consultant', 'specialist'].includes(role)) {
+      return res.status(400).json({ message: 'Choose consultant or specialist. Administrator access is managed separately.' });
+    }
+    if (typeof phone !== 'string' || phone.length > 32 || (phone && !/^[+()\d\s.-]+$/.test(phone))) {
+      return res.status(400).json({ message: 'Enter a valid phone number of at most 32 characters.' });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    if (await User.findOne({ email: normalizedEmail })) {
+      return res.status(409).json({ message: 'An account already exists for this email address.' });
+    }
+    const invitation = createInvitationToken();
+    const initialPassword = randomBytes(32).toString('hex');
+    const user = await runInTransaction(async (session) => {
+      const [created] = await User.create([{
+        tenantId: req.tenantId,
+        name,
+        firstName,
+        lastName,
+        email: normalizedEmail,
+        password: initialPassword,
+        role,
+        phone: phone.trim(),
+        accountStatus: 'pending_invitation',
+        invitationTokenHash: invitation.tokenHash,
+        invitationExpiresAt: invitation.expiresAt,
+        invitedAt: new Date(),
+        invitedBy: req.user._id,
+      }], { session });
+      await writeAuditLog({
+        req,
+        action: 'user.invitation_created',
+        resourceType: 'User',
+        resourceId: created._id,
+        after: { email: created.email, role: created.role, accountStatus: created.accountStatus, expiresAt: invitation.expiresAt },
+        session,
+      });
+      return created;
+    });
+    const result = await deliverInvitation(req, user, invitation.token);
+    return res.status(201).json({
+      message: result.delivery.sent
+        ? 'Account invitation created and email accepted by the configured mail provider.'
+        : 'Account invitation created, but email delivery is not configured or failed. Share the one-time setup link securely with the invitee.',
+      user: {
+        _id: user._id,
+        name: user.name,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        role: user.role,
+        accountStatus: user.accountStatus,
+        invitationExpiresAt: invitation.expiresAt,
+      },
+      delivery: result.delivery,
+      ...(result.invitationUrl ? { invitationUrl: result.invitationUrl } : {}),
+    });
+  } catch (error) {
+    return respondWithControllerError(req, res, error);
+  }
+};
+
+const resendUserInvitation = async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid user ID.' });
+    const invitation = createInvitationToken();
+    const user = await runInTransaction(async (session) => {
+      const current = await User.findById(req.params.id).session(session);
+      if (!current) {
+        const error = new Error('User not found.');
+        error.statusCode = 404;
+        throw error;
+      }
+      const canReplacePendingInvite = current.accountStatus === 'pending_invitation'
+        || (current.accountStatus === 'suspended' && current.invitedAt && !current.passwordChangedAt);
+      if (!canReplacePendingInvite || !['consultant', 'specialist'].includes(current.role)) {
+        const error = new Error('Only an account with a pending invitation can receive a replacement invitation.');
+        error.statusCode = 409;
+        throw error;
+      }
+      current.accountStatus = 'pending_invitation';
+      current.invitationTokenHash = invitation.tokenHash;
+      current.invitationExpiresAt = invitation.expiresAt;
+      current.invitedAt = new Date();
+      current.invitedBy = req.user._id;
+      await current.save({ session });
+      await writeAuditLog({
+        req,
+        action: 'user.invitation_resent',
+        resourceType: 'User',
+        resourceId: current._id,
+        after: { accountStatus: current.accountStatus, expiresAt: invitation.expiresAt },
+        session,
+      });
+      return current;
+    });
+    const result = await deliverInvitation(req, user, invitation.token);
+    return res.json({
+      message: result.delivery.sent
+        ? 'Replacement invitation email accepted by the configured mail provider.'
+        : 'Replacement invitation created, but email delivery is not configured or failed. Share the one-time setup link securely with the invitee.',
+      user: { _id: user._id, name: user.name, email: user.email, role: user.role, accountStatus: user.accountStatus, invitationExpiresAt: invitation.expiresAt },
+      delivery: result.delivery,
+      ...(result.invitationUrl ? { invitationUrl: result.invitationUrl } : {}),
+    });
+  } catch (error) {
+    return respondWithControllerError(req, res, error);
+  }
+};
+
+const updateUserStatus = async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid user ID.' });
+    const { accountStatus } = req.body;
+    if (!['active', 'suspended'].includes(accountStatus)) {
+      return res.status(400).json({ message: 'Choose active or suspended account status.' });
+    }
+    const user = await runInTransaction(async (session) => {
+      const current = await User.findById(req.params.id).session(session);
+      if (!current) {
+        const error = new Error('User not found.');
+        error.statusCode = 404;
+        throw error;
+      }
+      if (current._id.toString() === req.user._id.toString() || current.role === 'admin') {
+        const error = new Error('Administrator accounts cannot be suspended from this roster action.');
+        error.statusCode = 409;
+        throw error;
+      }
+      if (current.accountStatus === 'pending_invitation' && accountStatus === 'active') {
+        const error = new Error('The user must accept the invitation and set a password before activation.');
+        error.statusCode = 409;
+        throw error;
+      }
+      if (
+        current.accountStatus === 'suspended'
+        && accountStatus === 'active'
+        && current.invitedAt
+        && !current.passwordChangedAt
+      ) {
+        const error = new Error('This account has not completed setup. Resend its invitation instead of activating it directly.');
+        error.statusCode = 409;
+        throw error;
+      }
+      const previousStatus = current.accountStatus;
+      current.accountStatus = accountStatus;
+      if (accountStatus === 'suspended') {
+        current.invitationTokenHash = undefined;
+        current.invitationExpiresAt = null;
+      }
+      await current.save({ session });
+      await writeAuditLog({
+        req,
+        action: 'user.account_status_changed',
+        resourceType: 'User',
+        resourceId: current._id,
+        before: { accountStatus: previousStatus },
+        after: { accountStatus },
+        session,
+      });
+      return current;
+    });
+    return res.json({
+      message: `Account ${accountStatus === 'suspended' ? 'suspended' : 'reactivated'}.`,
+      user: { _id: user._id, name: user.name, email: user.email, role: user.role, accountStatus: user.accountStatus },
+    });
   } catch (error) {
     return respondWithControllerError(req, res, error);
   }
@@ -451,6 +684,9 @@ const replyToTicket = async (req, res) => {
 module.exports = {
   getAdminStats,
   getUsers,
+  createUserInvitation,
+  resendUserInvitation,
+  updateUserStatus,
   getAuditLogs,
   updateUserRole,
   processWithdrawal,

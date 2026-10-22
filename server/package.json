@@ -9,8 +9,8 @@
     "dev": "nodemon server.js",
     "test": "node --test",
     "init-db": "node scripts/initMongoDb.js",
-    "promote-admin": "node scripts/promoteAdmin.js",
-    "seed": "node scripts/seed.js"
+    "bootstrap-admin": "node scripts/bootstrapAdmin.js",
+    "promote-admin": "node scripts/promoteAdmin.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -21,7 +21,8 @@
     "googleapis": "^186.0.0",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.9.5"
+    "mongoose": "^8.9.5",
+    "nodemailer": "^10.2.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.9"
