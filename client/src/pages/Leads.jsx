@@ -127,6 +127,12 @@ const STAGE_COLORS = {
   '5_closed_won_pending_payout': 'bg-green-100 text-green-800',
   'Closed Lost': 'bg-red-100 text-red-800',
 };
+const DEAL_PACKAGES = [
+  { key: 'essential_starter', label: 'Essential Starter', commission: 'R500 once-off' },
+  { key: 'growth_professional', label: 'Growth Professional', commission: 'R750 once-off' },
+  { key: 'complete_academy', label: 'Complete Academy', commission: 'R1,000 once-off' },
+  { key: 'institutional_flagship', label: 'Institutional Flagship', commission: 'R1,500–R3,000 once-off' },
+];
 
 export default function Leads() {
   const queryClient = useQueryClient();
@@ -147,7 +153,10 @@ export default function Leads() {
   const [stageChange, setStageChange] = useState(null);
   const [stageReport, setStageReport] = useState('');
   const [stageReportError, setStageReportError] = useState('');
+  const [dealPackage, setDealPackage] = useState('');
+  const [customCommissionAmount, setCustomCommissionAmount] = useState('1500');
   const [historyLead, setHistoryLead] = useState(null);
+  const [detailsLead, setDetailsLead] = useState(null);
   const leadsQuery = useQuery({
     queryKey: ['leads'],
     queryFn: async () => (await API.get('/leads')).data,
@@ -231,7 +240,19 @@ export default function Leads() {
   });
 
   const stageMutation = useMutation({
-    mutationFn: ({ leadId, stage, reportSummary }) => API.put(`/leads/${leadId}`, { pipelineStage: stage, reportSummary }),
+    mutationFn: ({ leadId, stage, reportSummary, dealPackage: selectedPackage, customCommissionAmount: customAmount }) => API.put(
+      `/leads/${leadId}`,
+      {
+        pipelineStage: stage,
+        reportSummary,
+        ...(stage === '5_closed_won_pending_payout'
+          ? {
+            dealPackage: selectedPackage,
+            ...(selectedPackage === 'institutional_flagship' ? { customCommissionAmount: Number(customAmount) } : {}),
+          }
+          : {}),
+      }
+    ),
     onSuccess: async ({ data }) => {
       if (data.commissionCreditedAt) {
         try {
@@ -327,6 +348,8 @@ export default function Leads() {
     const currentLead = leads.find((lead) => lead._id === leadId);
     if (!currentLead || getLeadPipelineStage(currentLead) === stage) return;
     setStageChange({ leadId, stage, clientName: currentLead.clientName });
+    setDealPackage(currentLead.dealPackage || '');
+    setCustomCommissionAmount(String(currentLead.customCommissionAmount || 1500));
     setStageReport('');
     setStageReportError('');
   }
@@ -335,7 +358,13 @@ export default function Leads() {
     setBusyLeadId(leadId);
     setError('');
     try {
-      await stageMutation.mutateAsync({ leadId, stage, reportSummary });
+      await stageMutation.mutateAsync({
+        leadId,
+        stage,
+        reportSummary,
+        dealPackage,
+        customCommissionAmount,
+      });
       return true;
     } catch {
       // The mutation reports its error in the page alert.
@@ -350,6 +379,18 @@ export default function Leads() {
     const report = stageReport.trim();
     if (report.length < 15) {
       setStageReportError('Please enter a stage report of at least 15 characters.');
+      return;
+    }
+    if (stageChange?.stage === '5_closed_won_pending_payout' && !dealPackage) {
+      setStageReportError('Select the package purchased before closing this referral.');
+      return;
+    }
+    if (
+      stageChange?.stage === '5_closed_won_pending_payout'
+      && dealPackage === 'institutional_flagship'
+      && (!Number.isFinite(Number(customCommissionAmount)) || Number(customCommissionAmount) < 1500 || Number(customCommissionAmount) > 3000)
+    ) {
+      setStageReportError('Institutional Flagship commission must be between R1,500 and R3,000.');
       return;
     }
     if (stageChange && await handleStageChange(stageChange.leadId, stageChange.stage, report)) {
@@ -548,6 +589,7 @@ export default function Leads() {
                   resetActivity({ type: 'call', text: '', scheduledAt: '', meetingTitle: '', meetingUrl: '', appointmentType: 'Product Demo', scheduledFollowUp: '' });
                 }}
                 onHistory={setHistoryLead}
+                onDetails={setDetailsLead}
                 onDelete={handleDelete}
                 onAppointmentStatus={updateAppointmentStatus}
               />
@@ -562,6 +604,7 @@ export default function Leads() {
                 <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500">
                   <th className="p-4">Client / Company</th>
                   <th className="p-4">Contact Info</th>
+                  <th className="p-4">Qualification / Operations</th>
                   {(isAdmin || isSpecialist) && <th className="p-4">Sourced by</th>}
                   <th className="p-4">Est. Value</th>
                   <th className="p-4">Win Probability</th>
@@ -590,10 +633,22 @@ export default function Leads() {
                             {assignedToMe ? 'Assigned to you' : `Assigned to ${lead.assignedSpecialist.name || 'another specialist'}`}
                           </p>
                         )}
+                        {isConsultant && lead.assignedSpecialist && (
+                          <p className="mt-1 text-xs font-medium text-emerald-700">
+                            Assigned to {lead.assignedSpecialist.name || 'a lead specialist'}
+                          </p>
+                        )}
                       </td>
                       <td className="p-4">
                         <p className="text-slate-700">{lead.emailAddress || lead.clientEmail || 'No email recorded'}</p>
                         <p className="text-xs text-slate-500">{lead.primaryMobile || lead.clientPhone}</p>
+                        <p className="text-xs capitalize text-slate-500">Preferred: {(lead.preferredContactMethod || 'whatsapp').replaceAll('_', ' ')}</p>
+                      </td>
+                      <td className="p-4 text-xs text-slate-600">
+                        <p>{lead.registrationStatus || 'Registration not recorded'}</p>
+                        <p>{lead.studentCount ?? 0} learners · {lead.staffCount ?? 0} staff</p>
+                        <p>{lead.currentAdminMethod || 'Admin method not recorded'} · {lead.primaryPainPoint || 'Pain point not recorded'}</p>
+                        <p className="capitalize">{lead.qualificationTier || 'warm'} · {lead.ownerPersona?.replaceAll('_', ' ') || 'persona not assessed'}</p>
                       </td>
                       {(isAdmin || isSpecialist) && <td className="p-4 text-slate-600">{lead.consultant?.name || '—'}</td>}
                       <td className="p-4 font-medium text-slate-800">
@@ -635,6 +690,15 @@ export default function Leads() {
                             {busyLeadId === lead._id ? 'Claiming...' : 'Claim lead'}
                           </button>
                         )}
+                        {(isSpecialist || isConsultant || isAdmin) && (
+                          <button
+                            className="rounded px-2 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50"
+                            onClick={() => setDetailsLead(lead)}
+                            type="button"
+                          >
+                            Details
+                          </button>
+                        )}
                         {canEdit && (
                           <button
                             aria-label={`Edit ${lead.clientName}`}
@@ -674,7 +738,7 @@ export default function Leads() {
                           onClick={() => setHistoryLead(lead)}
                           type="button"
                         >
-                          History
+                          {isConsultant ? 'Track referral' : 'History'}
                         </button>
                       </td>
                     </tr>
@@ -886,6 +950,42 @@ export default function Leads() {
               <p className="mt-1 text-sm text-slate-500">{stageChange.clientName}: {STAGE_LABELS[stageChange.stage] || stageChange.stage}</p>
             </header>
             <form className="space-y-4 p-6" onSubmit={submitStageChange}>
+              {stageChange.stage === '5_closed_won_pending_payout' && (
+                <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                  <label className="block text-sm font-medium text-slate-700">
+                    ECD package purchased *
+                    <select
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2"
+                      onChange={(event) => setDealPackage(event.target.value)}
+                      required
+                      value={dealPackage}
+                    >
+                      <option value="">Choose the closed package</option>
+                      {DEAL_PACKAGES.map((item) => <option key={item.key} value={item.key}>{item.label} · {item.commission}</option>)}
+                    </select>
+                  </label>
+                  {dealPackage === 'institutional_flagship' && (
+                    <label className="block text-sm font-medium text-slate-700">
+                      Agreed once-off commission (R1,500–R3,000) *
+                      <input
+                        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2"
+                        max="3000"
+                        min="1500"
+                        onChange={(event) => setCustomCommissionAmount(event.target.value)}
+                        required
+                        step="0.01"
+                        type="number"
+                        value={customCommissionAmount}
+                      />
+                    </label>
+                  )}
+                  {dealPackage && dealPackage !== 'institutional_flagship' && (
+                    <p className="text-xs text-emerald-900">
+                      Consultant commission: {DEAL_PACKAGES.find((item) => item.key === dealPackage)?.commission}.
+                    </p>
+                  )}
+                </div>
+              )}
               <label className="block text-sm font-medium text-slate-700">
                 Summarize the client interaction, outcome, and next step
                 <textarea
@@ -990,11 +1090,18 @@ export default function Leads() {
       {historyLead && (
         <LeadHistoryDialog lead={historyLead} onClose={() => setHistoryLead(null)} />
       )}
+      {detailsLead && (
+        <LeadDetailsDialog
+          lead={detailsLead}
+          onClose={() => setDetailsLead(null)}
+          onTrack={() => { setHistoryLead(detailsLead); setDetailsLead(null); }}
+        />
+      )}
     </section>
   );
 }
 
-function LeadStageColumn({ stage, leads, canMove, userId, role, busyLeadId, onClaim, onEdit, onActivity, onHistory, onDelete, onAppointmentStatus, isSpecialist }) {
+function LeadStageColumn({ stage, leads, canMove, userId, role, busyLeadId, onClaim, onEdit, onActivity, onHistory, onDetails, onDelete, onAppointmentStatus, isSpecialist }) {
   const { setNodeRef, isOver } = useDroppable({ id: `stage:${stage}` });
   return (
     <section className={`min-w-64 rounded-xl border p-3 ${isOver ? 'border-blue-400 bg-blue-50' : 'border-slate-200 bg-slate-100/70'}`}>
@@ -1012,10 +1119,12 @@ function LeadStageColumn({ stage, leads, canMove, userId, role, busyLeadId, onCl
               key={lead._id}
               lead={lead}
               isSpecialist={isSpecialist}
+              role={role}
               disabled={Boolean(lead.commissionCreditedAt) || !(role === 'admin' || (canMove && role === 'specialist' && assignedToMe)) || busyLeadId === lead._id}
               onEdit={canEdit ? () => onEdit(lead) : null}
               onActivity={role === 'specialist' && assignedToMe ? () => onActivity(lead) : null}
               onHistory={() => onHistory(lead)}
+              onDetails={() => onDetails(lead)}
               onClaim={role === 'specialist' && unassigned && !['Closed Won', 'Closed Lost'].includes(lead.stage) ? () => onClaim(lead._id) : null}
               onDelete={role === 'consultant' && unassigned ? () => onDelete(lead._id) : null}
               onAppointmentStatus={role === 'specialist' && assignedToMe
@@ -1030,7 +1139,7 @@ function LeadStageColumn({ stage, leads, canMove, userId, role, busyLeadId, onCl
   );
 }
 
-function LeadBoardCard({ lead, disabled, onEdit, onActivity, onHistory, onClaim, onDelete, onAppointmentStatus, isSpecialist }) {
+function LeadBoardCard({ lead, disabled, onEdit, onActivity, onHistory, onDetails, onClaim, onDelete, onAppointmentStatus, isSpecialist, role }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: lead._id,
     disabled,
@@ -1054,8 +1163,15 @@ function LeadBoardCard({ lead, disabled, onEdit, onActivity, onHistory, onClaim,
       <p className="mt-2 text-xs font-medium text-violet-700">Win probability: {lead.conversionProbability ?? 10}%</p>
       <p className="mt-1 truncate text-xs text-slate-500">{lead.centerName || lead.companyName || lead.emailAddress || lead.clientEmail}</p>
       {lead.townshipRegion && <p className="mt-1 text-xs text-slate-500">{lead.townshipRegion}</p>}
+      <p className="mt-1 text-xs text-slate-600">{lead.address || 'Address not recorded'}</p>
+      <p className="mt-1 text-xs text-slate-600">{lead.primaryMobile || lead.clientPhone}{(lead.emailAddress || lead.clientEmail) ? ` · ${lead.emailAddress || lead.clientEmail}` : ''}</p>
       {isSpecialist && <p className="mt-1 text-xs text-slate-600">Sourced by {lead.consultant?.name || 'consultant'}</p>}
-      {lead.qualificationTier && <p className="mt-1 text-xs font-medium capitalize text-slate-600">Qualification: {lead.qualificationTier}</p>}
+      {role === 'consultant' && lead.assignedSpecialist && (
+        <p className="mt-1 text-xs font-medium text-emerald-700">Assigned to {lead.assignedSpecialist.name || 'a lead specialist'}</p>
+      )}
+      <p className="mt-1 text-xs text-slate-600">{lead.registrationStatus || 'Registration not recorded'} · {lead.studentCount ?? 0} learners / {lead.staffCount ?? 0} staff</p>
+      <p className="mt-1 text-xs capitalize text-slate-600">{lead.primaryPainPoint || 'Pain point not recorded'} · {lead.currentAdminMethod || 'Admin method not recorded'}</p>
+      {lead.qualificationTier && <p className="mt-1 text-xs font-medium capitalize text-slate-600">Qualification: {lead.qualificationTier} · {lead.ownerPersona?.replaceAll('_', ' ') || 'persona not assessed'}</p>}
       <p className="mt-2 line-clamp-2 text-xs text-slate-600">{lead.initialEncounterNotes || lead.notes || 'No recent notes'}</p>
       {stageStartedAt && (
         <p className="mt-2 text-[11px] font-medium text-amber-700">
@@ -1086,12 +1202,13 @@ function LeadBoardCard({ lead, disabled, onEdit, onActivity, onHistory, onClaim,
           )}
         </div>
       ))}
-      {(onEdit || onActivity || onClaim || onDelete || onHistory) && (
+      {(onEdit || onActivity || onClaim || onDelete || onHistory || onDetails) && (
         <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-2">
           {onClaim && <button className="text-xs font-semibold text-blue-700" onClick={onClaim} type="button">Claim lead</button>}
           {onEdit && <button className="text-xs font-semibold text-slate-600" onClick={onEdit} type="button">Open</button>}
+          {onDetails && <button className="text-xs font-semibold text-indigo-700" onClick={onDetails} type="button">View details</button>}
           {onActivity && <button className="text-xs font-semibold text-blue-700" onClick={onActivity} type="button">Log touchpoint</button>}
-          {onHistory && <button className="text-xs font-semibold text-slate-600" onClick={onHistory} type="button">History</button>}
+          {onHistory && <button className="text-xs font-semibold text-slate-600" onClick={onHistory} type="button">{role === 'consultant' ? 'Track referral' : 'History'}</button>}
           {onDelete && <button aria-label={`Delete ${lead.clientName}`} className="ml-auto text-slate-400 hover:text-rose-600" onClick={onDelete} type="button"><Trash2 size={14} /></button>}
         </div>
       )}
@@ -1175,18 +1292,49 @@ function LeadHistoryDialog({ lead, onClose }) {
   }));
   const events = [...stageEvents, ...activityEvents, ...transferEvents, ...appointmentEvents]
     .sort((first, second) => new Date(second.date) - new Date(first.date));
+  const currentStage = getLeadPipelineStage(lead);
+  const currentStageIndex = PIPELINE_STAGES.indexOf(currentStage);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
       <section aria-labelledby="lead-history-title" aria-modal="true" className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white shadow-xl" role="dialog">
         <header className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
           <div>
-            <h2 className="text-lg font-bold text-slate-800" id="lead-history-title">Lead activity history</h2>
+            <h2 className="text-lg font-bold text-slate-800" id="lead-history-title">{lead.consultant ? 'Referral progress & activity' : 'Lead activity history'}</h2>
             <p className="text-sm text-slate-500">{lead.clientName}</p>
           </div>
           <button aria-label="Close lead history" className="text-slate-400 hover:text-slate-600" onClick={onClose} type="button"><X size={20} /></button>
         </header>
         <div className="space-y-4 p-6">
+          <section aria-label="Referral pipeline timeline" className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <h3 className="mb-4 text-sm font-bold text-slate-800">Pipeline progress</h3>
+            <ol className="space-y-3">
+              {PIPELINE_STAGES.map((stage, index) => {
+                const stageEvent = (lead.stageHistory || []).find((item) => item.toPipelineStage === stage);
+                const complete = index <= currentStageIndex;
+                return (
+                  <li className="grid grid-cols-[1rem_1fr] gap-3" key={stage}>
+                    <span aria-hidden="true" className={`mt-1 h-3 w-3 rounded-full ${complete ? 'bg-emerald-600 ring-4 ring-emerald-100' : 'bg-slate-300'}`} />
+                    <div className={`border-l-2 pb-2 pl-3 ${complete ? 'border-emerald-200' : 'border-slate-200'}`}>
+                      <p className={`text-xs font-bold ${complete ? 'text-slate-800' : 'text-slate-400'}`}>{STAGE_LABELS[stage]}</p>
+                      {stageEvent ? (
+                        <div className="mt-1 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                          <p className="max-w-2xl whitespace-pre-wrap text-xs leading-5 text-slate-600">{stageEvent.reportSummary}</p>
+                          <span className="shrink-0 text-[10px] text-slate-400">
+                            {stageEvent.completedBy?.name || 'Team member'} · {new Date(stageEvent.createdAt).toLocaleDateString('en-ZA')}
+                          </span>
+                        </div>
+                      ) : (
+                        <p className="mt-1 text-xs text-slate-400">{index === currentStageIndex ? 'Current stage' : complete ? 'Completed' : 'Awaiting progress'}</p>
+                      )}
+                      {index === currentStageIndex && <span className="mt-1 inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">Current</span>}
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </section>
+          <h3 className="pt-2 text-sm font-bold text-slate-800">Activity notes &amp; handoff history</h3>
           {events.length === 0 ? (
             <p className="text-sm text-slate-500">No activity has been recorded yet.</p>
           ) : events.map((event, index) => (
@@ -1208,6 +1356,63 @@ function LeadHistoryDialog({ lead, onClose }) {
               </p>
             </article>
           ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function LeadDetailsDialog({ lead, onClose, onTrack }) {
+  const fields = [
+    ['Center', lead.centerName || lead.companyName],
+    ['Decision maker', lead.principalName || lead.clientName],
+    ['Region', lead.townshipRegion],
+    ['Street address', lead.address],
+    ['Registration', lead.registrationStatus],
+    ['Primary phone', lead.primaryMobile || lead.clientPhone],
+    ['WhatsApp', lead.whatsappNumber],
+    ['Email', lead.emailAddress || lead.clientEmail],
+    ['Preferred contact', lead.preferredContactMethod?.replaceAll('_', ' ')],
+    ['Learners (aggregate)', lead.studentCount],
+    ['Staff', lead.staffCount],
+    ['Current admin method', lead.currentAdminMethod],
+    ['Primary pain point', lead.primaryPainPoint],
+    ['Owner persona', lead.ownerPersona?.replaceAll('_', ' ')],
+    ['Qualification', lead.qualificationTier],
+    ['Contract value', lead.estimatedValue == null ? '—' : `R${Number(lead.estimatedValue).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}`],
+    ['Package purchased', DEAL_PACKAGES.find((item) => item.key === lead.dealPackage)?.label || 'Not closed'],
+    ['Consultant commission', lead.commissionCreditedAt ? `R${Number(lead.commissionEarned).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}` : 'Pending deal closure'],
+    ['Sourced by', lead.consultant?.name || 'Consultant'],
+    ['Assigned specialist', lead.assignedSpecialist?.name || 'Unclaimed'],
+  ];
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+      <section aria-labelledby="lead-details-title" aria-modal="true" className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white shadow-xl" role="dialog">
+        <header className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
+          <div>
+            <h2 className="text-lg font-bold text-slate-800" id="lead-details-title">Referral details</h2>
+            <p className="text-sm text-slate-500">{lead.centerName || lead.companyName || lead.clientName}</p>
+          </div>
+          <button aria-label="Close referral details" className="text-slate-400 hover:text-slate-600" onClick={onClose} type="button"><X size={20} /></button>
+        </header>
+        <div className="space-y-5 p-6">
+          <dl className="grid gap-3 sm:grid-cols-2">
+            {fields.map(([label, value]) => (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" key={label}>
+                <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</dt>
+                <dd className="mt-1 break-words text-sm font-medium capitalize text-slate-800">{value ?? 'Not recorded'}</dd>
+              </div>
+            ))}
+          </dl>
+          <section className="rounded-lg border border-slate-200 p-4">
+            <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Consultant handoff notes</h3>
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{lead.initialEncounterNotes || lead.notes || 'No handoff notes provided.'}</p>
+          </section>
+          <p className="text-xs text-slate-500">Only aggregate learner counts are recorded. Do not enter identifiable information about children.</p>
+          <footer className="flex justify-end gap-2 border-t border-slate-200 pt-4">
+            <button className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700" onClick={onClose} type="button">Close</button>
+            <button className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800" onClick={onTrack} type="button">Track activity</button>
+          </footer>
         </div>
       </section>
     </div>

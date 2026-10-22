@@ -9,6 +9,7 @@ const Agency = require('../models/Agency');
 const { writeAuditLog } = require('../services/auditService');
 const { runInTransaction } = require('../services/transactionService');
 const { toCurrency } = require('../services/money');
+const { COMMISSION_PACKAGES } = require('../services/commissionPackages');
 const { respondWithControllerError } = require('../middleware/controllerError');
 
 const getAdminStats = async (req, res) => {
@@ -20,6 +21,7 @@ const getAdminStats = async (req, res) => {
       totalLeads,
       closedWonLeads,
       commissionTotals,
+      packageCommissionTotals,
       pendingWithdrawals,
       openTickets,
     ] = await Promise.all([
@@ -29,6 +31,11 @@ const getAdminStats = async (req, res) => {
       Lead.countDocuments(),
       Lead.countDocuments({ stage: 'Closed Won' }),
       Lead.aggregate([{ $group: { _id: null, total: { $sum: '$commissionEarned' } } }]),
+      Lead.aggregate([
+        { $match: { dealPackage: { $in: Object.keys(COMMISSION_PACKAGES) } } },
+        { $group: { _id: '$dealPackage', deals: { $sum: 1 }, commission: { $sum: '$commissionEarned' } } },
+        { $sort: { _id: 1 } },
+      ]),
       Withdrawal.find({ status: { $in: ['Pending', 'Approved'] } }).select('amount'),
       Ticket.countDocuments({ status: { $in: ['Open', 'In Progress'] } }),
     ]);
@@ -38,6 +45,11 @@ const getAdminStats = async (req, res) => {
       leads: { total: totalLeads, closedWon: closedWonLeads },
       finance: {
         commissionEarned: toCurrency(commissionTotals[0]?.total || 0),
+        packageBreakdown: packageCommissionTotals.map((entry) => ({
+          package: entry._id,
+          deals: entry.deals,
+          commission: toCurrency(entry.commission),
+        })),
         pendingCount: pendingWithdrawals.length,
         pendingPayoutAmount: toCurrency(pendingWithdrawals.reduce((sum, withdrawal) => sum + withdrawal.amount, 0)),
       },

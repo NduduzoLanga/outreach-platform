@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const tenantPlugin = require('../security/tenantPlugin');
 const { PIPELINE_STAGES, getPipelineStageFromLegacy } = require('../services/leadPipeline');
+const { COMMISSION_PACKAGES } = require('../services/commissionPackages');
 
 const OWNER_PERSONAS = [
   'defensive_guard',
@@ -101,6 +102,8 @@ const leadSchema = new mongoose.Schema(
     commissionRate: { type: Number, default: 10, min: 0, max: 100 },
     commissionEarned: { type: Number, default: 0, min: 0 },
     commissionCreditedAt: { type: Date, default: null },
+    dealPackage: { type: String, enum: ['', ...Object.keys(COMMISSION_PACKAGES)], default: '' },
+    customCommissionAmount: { type: Number, default: null, min: 1500, max: 3000 },
     conversionProbability: { type: Number, default: 10, min: 0, max: 100 },
     stage: {
       type: String,

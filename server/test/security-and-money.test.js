@@ -5,6 +5,7 @@ const { authorize } = require('../middleware/roleMiddleware');
 const { bindTenant, tenantContext } = require('../security/tenantContext');
 const { sanitizeAuditValue } = require('../services/auditService');
 const { isCentAmount, toCurrency, calculateCommission } = require('../services/money');
+const { calculatePackageCommission } = require('../services/commissionPackages');
 const { createGoogleMeetEvent, updateGoogleMeetEvent } = require('../services/googleCalendarService');
 const { getDirectMongoUri, getMongoUri, isSrvDnsResolutionFailure } = require('../config/mongoUri');
 const Lead = require('../models/Lead');
@@ -191,15 +192,22 @@ test('lead schema preserves intake compliance and appointment workflow fields', 
       appointmentType: 'Product Demo',
       scheduledFor: new Date(Date.now() + 60_000),
     }],
+    dealPackage: 'institutional_flagship',
+    customCommissionAmount: 2400,
   });
 
   await assert.doesNotReject(lead.validate());
   assert.equal(lead.pipelineStage, '1_new_unclaimed');
   assert.equal(lead.zeroChildrenDataCertified, true);
+  assert.equal(lead.dealPackage, 'institutional_flagship');
+  assert.equal(lead.customCommissionAmount, 2400);
   lead.popiaConsentVerbalConfirmed = false;
   lead.appointments[0].appointmentType = 'Invalid';
   const validation = lead.validateSync();
   assert.ok(validation.errors['appointments.0.appointmentType']);
+  lead.appointments[0].appointmentType = 'Product Demo';
+  lead.customCommissionAmount = 3200;
+  assert.ok(lead.validateSync().errors.customCommissionAmount);
 
   const unverifiedLead = new Lead({
     tenantId: id,
@@ -222,6 +230,16 @@ test('commission calculation uses the lead rate and rounds to cents', () => {
   assert.equal(calculateCommission(10.05, 10), 1.01);
   assert.equal(calculateCommission(1000, 0), 0);
   assert.throws(() => calculateCommission(100, 101), /between 0 and 100/i);
+});
+
+test('fixed deal packages award the published once-off consultant commissions', () => {
+  assert.equal(calculatePackageCommission('essential_starter').amount, 500);
+  assert.equal(calculatePackageCommission('growth_professional').amount, 750);
+  assert.equal(calculatePackageCommission('complete_academy').amount, 1000);
+  assert.equal(calculatePackageCommission('institutional_flagship', 1500).amount, 1500);
+  assert.equal(calculatePackageCommission('institutional_flagship', 3000).amount, 3000);
+  assert.throws(() => calculatePackageCommission('institutional_flagship', 1499), /between R1500 and R3000/i);
+  assert.throws(() => calculatePackageCommission('unknown'), /valid closed-deal package/i);
 });
 
 test('lead stage history requires an execution report', () => {

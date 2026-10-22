@@ -1,5 +1,6 @@
 const Lead = require('../models/Lead');
 const Withdrawal = require('../models/Withdrawal');
+const LedgerEntry = require('../models/LedgerEntry');
 const { respondWithControllerError } = require('../middleware/controllerError');
 
 const getStatementSummary = async (req, res) => {
@@ -23,25 +24,32 @@ const getStatementSummary = async (req, res) => {
     }
     const periodFilter = { $gte: startDate, $lt: endDate };
     const userId = req.user._id;
-    const [leads, closedWonLeads, withdrawals, withdrawalTotals] = await Promise.all([
-      Lead.find({ consultant: userId, createdAt: periodFilter }).select('estimatedValue'),
-      Lead.find({ consultant: userId, commissionCreditedAt: periodFilter }).select('commissionEarned'),
-      Withdrawal.find({ consultant: userId, createdAt: periodFilter }).sort({ createdAt: -1 }).limit(5),
+    const [leads, commissionEntries, withdrawals, ledgerTransactions, withdrawalTotals] = await Promise.all([
+      Lead.find({ consultant: userId, createdAt: periodFilter })
+        .select('clientName centerName principalName townshipRegion stage pipelineStage estimatedValue dealPackage commissionEarned commissionCreditedAt createdAt')
+        .sort({ createdAt: -1 }),
+      LedgerEntry.find({ consultant: userId, type: 'commission_earned', createdAt: periodFilter })
+        .select('lead amount createdAt')
+        .populate('lead', 'clientName centerName principalName dealPackage')
+        .sort({ createdAt: -1 }),
+      Withdrawal.find({ consultant: userId, createdAt: periodFilter }).sort({ createdAt: -1 }),
+      LedgerEntry.find({ consultant: userId, createdAt: periodFilter })
+        .select('type amount availableBalanceBefore availableBalanceAfter lead withdrawal createdAt')
+        .populate('lead', 'clientName centerName dealPackage')
+        .populate('withdrawal', 'status')
+        .sort({ createdAt: -1 }),
       Withdrawal.aggregate([
         { $match: { consultant: userId, createdAt: periodFilter } },
         {
           $group: {
             _id: null,
             totalRequested: { $sum: '$amount' },
-            totalPaidOut: {
-              $sum: { $cond: [{ $eq: ['$status', 'Processed'] }, '$amount', 0] },
-            },
           },
         },
       ]),
     ]);
 
-    const totals = withdrawalTotals[0] || { totalRequested: 0, totalPaidOut: 0 };
+    const totals = withdrawalTotals[0] || { totalRequested: 0 };
     return res.json({
       consultant: {
         name: req.user.name,
@@ -52,12 +60,17 @@ const getStatementSummary = async (req, res) => {
       period: { month, startsAt: startDate, endsAt: endDate },
       metrics: {
         totalLeads: leads.length,
-        closedWonCount: closedWonLeads.length,
+        closedWonCount: commissionEntries.length,
         totalPipelineValue: leads.reduce((sum, lead) => sum + (lead.estimatedValue || 0), 0),
-        totalCommissionEarned: closedWonLeads.reduce((sum, lead) => sum + (lead.commissionEarned || 0), 0),
+        totalCommissionEarned: commissionEntries.reduce((sum, entry) => sum + entry.amount, 0),
         totalWithdrawalsRequested: totals.totalRequested,
-        totalPaidOut: totals.totalPaidOut,
+        totalPaidOut: ledgerTransactions
+          .filter((entry) => entry.type === 'withdrawal_paid')
+          .reduce((sum, entry) => sum + entry.amount, 0),
       },
+      leads,
+      commissionEntries,
+      ledgerTransactions,
       recentWithdrawals: withdrawals,
     });
   } catch (error) {

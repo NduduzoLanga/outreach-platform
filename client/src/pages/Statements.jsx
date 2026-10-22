@@ -7,6 +7,15 @@ function formatCurrency(value) {
   return `R${Number(value || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}`;
 }
 
+function formatPackage(value) {
+  return ({
+    essential_starter: 'Essential Starter',
+    growth_professional: 'Growth Professional',
+    complete_academy: 'Complete Academy',
+    institutional_flagship: 'Institutional Flagship',
+  })[value] || (value ? 'Legacy package' : '—');
+}
+
 export default function Statements() {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const statementQuery = useQuery({
@@ -33,11 +42,40 @@ export default function Statements() {
       ['Total paid out', formatCurrency(summary.metrics?.totalPaidOut)],
       ['Current balance', formatCurrency(summary.consultant?.currentBalance)],
       [],
-      ['Recent withdrawal date', 'Amount', 'Status'],
+      ['Referral', 'Center', 'Region', 'Lead stage', 'Package', 'Estimated value', 'Commission credited', 'Lead date'],
+      ...(summary.leads || []).map((lead) => [
+        lead.principalName || lead.clientName,
+        lead.centerName || '—',
+        lead.townshipRegion || '—',
+        lead.pipelineStage || lead.stage,
+        formatPackage(lead.dealPackage),
+        formatCurrency(lead.estimatedValue),
+        formatCurrency(lead.commissionEarned),
+        new Date(lead.createdAt).toLocaleDateString('en-ZA'),
+      ]),
+      [],
+      ['Commission date', 'Referral', 'Package', 'Amount'],
+      ...(summary.commissionEntries || []).map((entry) => [
+        new Date(entry.createdAt).toLocaleDateString('en-ZA'),
+        entry.lead?.principalName || entry.lead?.clientName || 'Lead record unavailable',
+        formatPackage(entry.lead?.dealPackage),
+        formatCurrency(entry.amount),
+      ]),
+      [],
+      ['Withdrawal date', 'Amount', 'Status'],
       ...(summary.recentWithdrawals || []).map((withdrawal) => [
         new Date(withdrawal.createdAt).toLocaleDateString('en-ZA'),
         formatCurrency(withdrawal.amount),
         withdrawal.status,
+      ]),
+      [],
+      ['Ledger date', 'Transaction', 'Referral / withdrawal', 'Amount', 'Balance after'],
+      ...(summary.ledgerTransactions || []).map((entry) => [
+        new Date(entry.createdAt).toLocaleDateString('en-ZA'),
+        entry.type.replaceAll('_', ' '),
+        entry.lead?.principalName || entry.lead?.clientName || entry.withdrawal?.status || 'Account balance adjustment',
+        formatCurrency(entry.amount),
+        formatCurrency(entry.availableBalanceAfter),
       ]),
     ];
     const csv = rows.map((row) => row.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(',')).join('\r\n');
@@ -151,7 +189,73 @@ export default function Statements() {
         </section>
 
         <section>
-          <h3 className="mb-3 text-sm font-bold text-slate-800">Withdrawal Transactions Snapshot</h3>
+          <h3 className="mb-3 text-sm font-bold text-slate-800">Referral Records Supporting This Statement</h3>
+          {summary?.leads?.length ? (
+            <div className="overflow-x-auto rounded-lg border border-slate-200">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-slate-200 bg-slate-100 text-slate-600">
+                  <tr>
+                    <th className="p-3">Referral / Center</th>
+                    <th className="p-3">Region</th>
+                    <th className="p-3">Stage</th>
+                    <th className="p-3">Package</th>
+                    <th className="p-3">Est. value</th>
+                    <th className="p-3">Commission</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {summary.leads.map((lead) => (
+                    <tr key={lead._id}>
+                      <td className="p-3">
+                        <p className="font-semibold text-slate-800">{lead.principalName || lead.clientName}</p>
+                        <p className="text-slate-500">{lead.centerName || 'Center not recorded'}</p>
+                      </td>
+                      <td className="p-3">{lead.townshipRegion || '—'}</td>
+                      <td className="p-3">{lead.pipelineStage?.replaceAll('_', ' ') || lead.stage}</td>
+                      <td className="p-3">{formatPackage(lead.dealPackage)}</td>
+                      <td className="p-3">{formatCurrency(lead.estimatedValue)}</td>
+                      <td className="p-3 font-semibold">{lead.commissionCreditedAt ? formatCurrency(lead.commissionEarned) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+              No referrals were captured in this statement month.
+            </p>
+          )}
+        </section>
+
+        <section>
+          <h3 className="mb-3 text-sm font-bold text-slate-800">Commission Transactions</h3>
+          {summary?.commissionEntries?.length ? (
+            <div className="overflow-x-auto rounded-lg border border-slate-200">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-slate-200 bg-slate-100 text-slate-600">
+                  <tr><th className="p-3">Date credited</th><th className="p-3">Referral</th><th className="p-3">Package</th><th className="p-3">Amount</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {summary.commissionEntries.map((entry) => (
+                    <tr key={entry._id}>
+                      <td className="p-3">{new Date(entry.createdAt).toLocaleDateString('en-ZA')}</td>
+                      <td className="p-3">{entry.lead?.principalName || entry.lead?.clientName || 'Lead record unavailable'}</td>
+                      <td className="p-3">{formatPackage(entry.lead?.dealPackage)}</td>
+                      <td className="p-3 font-semibold">{formatCurrency(entry.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+              No commissions were credited in this statement month.
+            </p>
+          )}
+        </section>
+
+        <section>
+          <h3 className="mb-3 text-sm font-bold text-slate-800">Withdrawal Transactions</h3>
           {summary?.recentWithdrawals?.length ? (
             <div className="overflow-hidden rounded-lg border border-slate-200">
               <table className="w-full text-left text-xs">
@@ -177,6 +281,35 @@ export default function Statements() {
             <p className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
               No withdrawal transactions yet.
             </p>
+          )}
+        </section>
+
+        <section>
+          <h3 className="mb-3 text-sm font-bold text-slate-800">Account Ledger</h3>
+          {summary?.ledgerTransactions?.length ? (
+            <div className="overflow-x-auto rounded-lg border border-slate-200">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-slate-200 bg-slate-100 text-slate-600">
+                  <tr><th className="p-3">Date</th><th className="p-3">Transaction</th><th className="p-3">Reference</th><th className="p-3">Amount</th><th className="p-3">Balance after</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {summary.ledgerTransactions.map((entry) => (
+                    <tr key={entry._id}>
+                      <td className="p-3">{new Date(entry.createdAt).toLocaleDateString('en-ZA')}</td>
+                      <td className="p-3 capitalize">{entry.type.replaceAll('_', ' ')}</td>
+                      <td className="p-3">
+                        {entry.lead?.principalName || entry.lead?.clientName
+                          || (entry.withdrawal ? `Withdrawal · ${entry.withdrawal.status}` : 'Account balance adjustment')}
+                      </td>
+                      <td className="p-3 font-semibold">{formatCurrency(entry.amount)}</td>
+                      <td className="p-3">{formatCurrency(entry.availableBalanceAfter)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">No ledger activity in this statement month.</p>
           )}
         </section>
       </article>

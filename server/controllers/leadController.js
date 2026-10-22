@@ -6,7 +6,8 @@ const { applyLeadRLS } = require('../middleware/roleMiddleware');
 const { runInTransaction } = require('../services/transactionService');
 const { writeAuditLog } = require('../services/auditService');
 const { respondWithControllerError } = require('../middleware/controllerError');
-const { toCurrency, calculateCommission } = require('../services/money');
+const { toCurrency } = require('../services/money');
+const { calculatePackageCommission } = require('../services/commissionPackages');
 const { createGoogleMeetEvent, updateGoogleMeetEvent } = require('../services/googleCalendarService');
 const {
   PIPELINE_STAGES,
@@ -259,6 +260,8 @@ const updateLead = async (req, res) => {
         estimatedValue: lead.estimatedValue,
         conversionProbability: lead.conversionProbability,
         notes: lead.notes,
+        dealPackage: lead.dealPackage,
+        customCommissionAmount: lead.customCommissionAmount,
       };
       const {
         clientName,
@@ -271,8 +274,10 @@ const updateLead = async (req, res) => {
         pipelineStage,
         notes,
         reportSummary,
+        dealPackage,
+        customCommissionAmount,
       } = req.body;
-      const stageFields = ['stage', 'pipelineStage', 'reportSummary', 'conversionProbability', 'notes'];
+      const stageFields = ['stage', 'pipelineStage', 'reportSummary', 'conversionProbability', 'notes', 'dealPackage', 'customCommissionAmount'];
       if (req.user.role === 'specialist') {
         const forbiddenFields = Object.keys(req.body).filter((field) => !stageFields.includes(field));
         if (forbiddenFields.length) {
@@ -433,6 +438,8 @@ const updateLead = async (req, res) => {
       if (conversionProbability !== undefined && req.user.role !== 'consultant') {
         lead.conversionProbability = conversionProbability;
       }
+      if (dealPackage !== undefined) lead.dealPackage = dealPackage;
+      if (customCommissionAmount !== undefined) lead.customCommissionAmount = Number(customCommissionAmount);
       if (notes !== undefined) lead.notes = notes;
       const requestedPipelineStage = pipelineStage !== undefined
         ? pipelineStage
@@ -495,6 +502,17 @@ const updateLead = async (req, res) => {
         lead.pipelineStage = getPipelineStageFromLegacy(stage);
       }
 
+      const isClosingDeal = lead.pipelineStage === '5_closed_won_pending_payout'
+        && previous.pipelineStage !== '5_closed_won_pending_payout';
+      let selectedCommission;
+      if (isClosingDeal) {
+        try {
+          selectedCommission = calculatePackageCommission(lead.dealPackage, lead.customCommissionAmount);
+        } catch (error) {
+          error.statusCode = 400;
+          throw error;
+        }
+      }
       if (lead.stage !== previous.stage || lead.pipelineStage !== previous.pipelineStage) {
         if (typeof reportSummary !== 'string' || reportSummary.trim().length < 15 || reportSummary.trim().length > 5000) {
           const error = new Error('A stage report of at least 15 characters is required to progress a lead.');
@@ -526,8 +544,8 @@ const updateLead = async (req, res) => {
       }
 
       await lead.save({ session });
-      if (lead.pipelineStage === '5_closed_won_pending_payout' && previous.pipelineStage !== '5_closed_won_pending_payout' && !lead.commissionCreditedAt) {
-        const commission = calculateCommission(lead.estimatedValue, lead.commissionRate);
+      if (isClosingDeal && !lead.commissionCreditedAt) {
+        const commission = selectedCommission.amount;
         lead.commissionEarned = commission;
         lead.commissionAmountAllocated = commission;
         lead.commissionCreditedAt = new Date();
@@ -563,7 +581,12 @@ const updateLead = async (req, res) => {
             resourceType: 'Lead',
             resourceId: lead._id,
             before: { consultantBalance: balanceBefore, commissionEarned: 0 },
-            after: { consultantBalance: consultant.balance, commissionEarned: commission, commissionRate: lead.commissionRate },
+            after: {
+              consultantBalance: consultant.balance,
+              commissionEarned: commission,
+              dealPackage: selectedCommission.packageKey,
+              packageLabel: selectedCommission.packageLabel,
+            },
             session,
           });
         }
@@ -583,6 +606,8 @@ const updateLead = async (req, res) => {
           estimatedValue: lead.estimatedValue,
           conversionProbability: lead.conversionProbability,
           notes: lead.notes,
+          dealPackage: lead.dealPackage,
+          customCommissionAmount: lead.customCommissionAmount,
           popiaConsentVerbalConfirmed: lead.popiaConsentVerbalConfirmed,
           popiaConsentConfirmedAt: lead.popiaConsentConfirmedAt,
           zeroChildrenDataCertified: lead.zeroChildrenDataCertified,

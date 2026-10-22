@@ -6,6 +6,12 @@ import API from '../services/api';
 
 const ROLES = ['consultant', 'specialist', 'admin'];
 const TICKET_STATUSES = ['Open', 'In Progress', 'Resolved', 'Closed'];
+const PACKAGE_LABELS = {
+  essential_starter: 'Essential Starter',
+  growth_professional: 'Growth Professional',
+  complete_academy: 'Complete Academy',
+  institutional_flagship: 'Institutional Flagship',
+};
 
 function MetricCard({ label, value, detail, Icon, tone }) {
   return (
@@ -181,6 +187,31 @@ export default function AdminDashboard() {
 
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <header className="border-b border-slate-200 bg-slate-50 px-6 py-4">
+          <h2 className="text-sm font-bold text-slate-800">Closed-deal package commission reconciliation</h2>
+          <p className="mt-1 text-xs text-slate-500">Package totals are calculated from credited deal records; detailed referrals and assignments are listed below.</p>
+        </header>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="border-b border-slate-200 bg-slate-100 text-xs uppercase text-slate-600">
+              <tr><th className="p-4">Package</th><th className="p-4">Successful deals</th><th className="p-4">Consultant commission credited</th></tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {(stats?.finance?.packageBreakdown || []).length ? stats.finance.packageBreakdown.map((item) => (
+                <tr key={item.package}>
+                  <td className="p-4 font-medium text-slate-800">{PACKAGE_LABELS[item.package] || item.package}</td>
+                  <td className="p-4">{item.deals}</td>
+                  <td className="p-4 font-semibold text-emerald-700">R{Number(item.commission).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</td>
+                </tr>
+              )) : (
+                <tr><td className="p-5 text-sm text-slate-500" colSpan={3}>No package commissions have been credited yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <header className="border-b border-slate-200 bg-slate-50 px-6 py-4">
           <h2 className="text-sm font-bold text-slate-800">Payout Requests</h2>
           <p className="mt-1 text-xs text-slate-500">Approve requests, mark approved payments as processed, or reject and return reserved funds.</p>
         </header>
@@ -303,17 +334,26 @@ export default function AdminDashboard() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="border-b border-slate-200 bg-slate-100 text-xs uppercase text-slate-600">
-                <tr><th className="p-4">Lead</th><th className="p-4">Consultant</th><th className="p-4">Stage</th><th className="p-4">Assigned Specialist</th></tr>
+                <tr><th className="p-4">Lead / Center</th><th className="p-4">Location &amp; Contact</th><th className="p-4">Consultant</th><th className="p-4">Stage</th><th className="p-4">Package / Commission</th><th className="p-4">Assigned Specialist</th></tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
                 {leads.map((lead) => (
                   <tr key={lead._id}>
                     <td className="p-4">
-                      <p className="font-semibold text-slate-800">{lead.clientName}</p>
-                      <p className="text-xs text-slate-500">{lead.companyName || lead.clientEmail}</p>
+                      <p className="font-semibold text-slate-800">{lead.principalName || lead.clientName}</p>
+                      <p className="text-xs text-slate-500">{lead.centerName || lead.companyName || 'Center not recorded'}</p>
+                    </td>
+                    <td className="p-4 text-xs text-slate-600">
+                      <p>{lead.townshipRegion || 'Region not recorded'}</p>
+                      <p>{lead.primaryMobile || lead.clientPhone}</p>
+                      <p>{lead.emailAddress || lead.clientEmail || 'No email'}</p>
                     </td>
                     <td className="p-4 text-slate-600">{lead.consultant?.name || '—'}</td>
-                    <td className="p-4 text-slate-600">{lead.stage}</td>
+                    <td className="p-4 text-slate-600">{lead.pipelineStage?.replaceAll('_', ' ') || lead.stage}</td>
+                    <td className="p-4 text-xs text-slate-700">
+                      <p>{PACKAGE_LABELS[lead.dealPackage] || (lead.stage === 'Closed Won' ? 'Legacy closed deal' : 'Not closed')}</p>
+                      {lead.commissionCreditedAt && <p className="mt-1 font-semibold text-emerald-700">R{Number(lead.commissionEarned).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</p>}
+                    </td>
                     <td className="p-4">
                       <label className="sr-only" htmlFor={`assign-${lead._id}`}>Assign specialist to {lead.clientName}</label>
                       <div className="space-y-2">
