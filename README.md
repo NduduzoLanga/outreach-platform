@@ -25,6 +25,14 @@ Invitation emails are sent from `Azania Paragon Institute <hr@azania-paragon.ins
 
 The admin sidebar includes an audit trail with action filters, search, before/after state inspection, and cursor-based loading of older entries.
 
+## Production deployment
+
+The Vercel project should use `client/` as its root directory, the Vite framework preset, `npm run build` as its build command, and `dist` as its output directory. Configure `VITE_API_URL` in the Vercel project environment before deploying; production builds fail if it is missing. It must be the HTTPS URL of the separately hosted API with `/api` at the end (for example, `https://api.example.com/api`). `client/vercel.json` supplies the SPA fallback for direct visits and refreshes on routes such as `/login` and `/accept-invite`.
+
+The current Express API is a long-running Node.js server (`server/server.js`), not a Vercel serverless function. Deploy it separately to a Node.js hosting service unless you add and validate a serverless adapter. Configure the API host's environment variables there, not in Git: `MONGODB_URI`, a unique `JWT_SECRET` of at least 32 characters, `CLIENT_ORIGIN` and `CLIENT_APP_URL` set to the exact HTTPS frontend origin, and authorized SMTP settings if invitation email is required. Use an Atlas or replica-set MongoDB deployment because transactional workflows depend on transaction support. Restrict database access and use least-privilege credentials; do not enable persistent bootstrap-admin variables after first-time setup.
+
+Keep `server/.env` untracked. The committed `server/.env.example` contains placeholders and is for reference only. Before production, rotate any credentials that have ever been exposed in chat or local Git history, and store replacements only in the hosting providers' environment-variable settings.
+
 ## Access model
 
 - **Consultant:** captures leads, can edit/delete unassigned leads, requests payouts, and views own statements/support tickets.
