@@ -1,4 +1,5 @@
 const AuditLog = require('../models/AuditLog');
+const { tenantContext } = require('../security/tenantContext');
 
 function requestMetadata(req) {
   return {
@@ -32,9 +33,14 @@ function sanitizeAuditValue(value, key = '') {
 }
 
 async function writeAuditLog({ req, action, resourceType, resourceId, before = null, after = null, session }) {
+  const tenantId = req.tenantId || req.user?.tenantId || tenantContext.getStore();
+  if (!tenantId) {
+    throw new Error('Cannot write an audit log without an authenticated tenant.');
+  }
   const metadata = requestMetadata(req);
   const [entry] = await AuditLog.create(
     [{
+      tenantId,
       actor: req.user._id,
       action,
       resourceType,
