@@ -32,8 +32,8 @@ function sanitizeAuditValue(value, key = '') {
   return value;
 }
 
-async function writeAuditLog({ req, action, resourceType, resourceId, before = null, after = null, session }) {
-  const tenantId = req.tenantId || req.user?.tenantId || tenantContext.getStore();
+async function writeAuditLog({ req, actor = req.user, action, resourceType, resourceId, before = null, after = null, session }) {
+  const tenantId = req.tenantId || actor?.tenantId || tenantContext.getStore();
   if (!tenantId) {
     throw new Error('Cannot write an audit log without an authenticated tenant.');
   }
@@ -41,7 +41,7 @@ async function writeAuditLog({ req, action, resourceType, resourceId, before = n
   const [entry] = await AuditLog.create(
     [{
       tenantId,
-      actor: req.user._id,
+      actor: actor._id,
       action,
       resourceType,
       resourceId,

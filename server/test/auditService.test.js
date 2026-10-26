@@ -7,6 +7,7 @@ const { writeAuditLog } = require('../services/auditService');
 test('audit log records use the authenticated user tenant explicitly', async () => {
   const tenantId = new mongoose.Types.ObjectId();
   const actorId = new mongoose.Types.ObjectId();
+  const requestActorId = new mongoose.Types.ObjectId();
   const originalCreate = AuditLog.create;
   let createdDocuments;
 
@@ -17,7 +18,8 @@ test('audit log records use the authenticated user tenant explicitly', async () 
 
   try {
     await writeAuditLog({
-      req: { user: { _id: actorId, tenantId }, get: () => '', headers: {} },
+      req: { user: { _id: requestActorId }, get: () => '', headers: {} },
+      actor: { _id: actorId, tenantId },
       action: 'user.invitation_created',
       resourceType: 'User',
       resourceId: new mongoose.Types.ObjectId(),

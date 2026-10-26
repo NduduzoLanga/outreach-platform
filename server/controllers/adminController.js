@@ -107,7 +107,10 @@ async function deliverInvitation(req, user, token) {
     });
   } catch (error) {
     console.error('Invitation email delivery failed:', error);
-    delivery = { sent: false, reason: 'delivery_failed' };
+    delivery = {
+      sent: false,
+      reason: typeof error.code === 'string' ? error.code : 'delivery_failed',
+    };
   }
   await recordInvitationDelivery(req, user._id, delivery);
   return {

@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
+const nodemailer = require('nodemailer');
 const User = require('../models/User');
 const {
   createInvitationToken,
@@ -109,6 +110,50 @@ test('email readiness requires valid SMTP settings and a complete optional auth 
     process.env.SMTP_PORT = 'invalid';
     assert.equal(isEmailDeliveryConfigured(), false);
   } finally {
+    for (const key of keys) {
+      if (original[key] === undefined) delete process.env[key];
+      else process.env[key] = original[key];
+    }
+  }
+});
+
+test('invitation SMTP sends use bounded connection and socket timeouts', async () => {
+  const keys = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_USER', 'SMTP_PASSWORD'];
+  const original = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  Object.assign(process.env, {
+    SMTP_HOST: 'smtp.example.test',
+    SMTP_PORT: '587',
+    SMTP_SECURE: 'false',
+    SMTP_USER: 'mailer@example.test',
+    SMTP_PASSWORD: 'test-only-password',
+  });
+  const originalCreateTransport = nodemailer.createTransport;
+  let transportOptions;
+  let closed = false;
+  nodemailer.createTransport = (options) => {
+    transportOptions = options;
+    return {
+      sendMail: async () => ({ messageId: 'test-message' }),
+      close: () => { closed = true; },
+    };
+  };
+
+  try {
+    const result = await sendInvitationEmail({
+      name: 'Test User',
+      email: 'test@example.test',
+      role: 'consultant',
+      invitationUrl: 'https://portal.example.test/accept-invite?token=test-token',
+      invitedBy: 'Administrator',
+    });
+
+    assert.deepEqual(result, { sent: true, reason: null });
+    assert.equal(transportOptions.connectionTimeout, 10_000);
+    assert.equal(transportOptions.greetingTimeout, 10_000);
+    assert.equal(transportOptions.socketTimeout, 20_000);
+    assert.equal(closed, true);
+  } finally {
+    nodemailer.createTransport = originalCreateTransport;
     for (const key of keys) {
       if (original[key] === undefined) delete process.env[key];
       else process.env[key] = original[key];

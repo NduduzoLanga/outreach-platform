@@ -82,7 +82,8 @@ const acceptInvitation = async (req, res) => {
       current.invitationExpiresAt = null;
       await current.save({ session });
       await writeAuditLog({
-        req: { ...req, user: current },
+        req,
+        actor: current,
         action: 'user.invitation_accepted',
         resourceType: 'User',
         resourceId: current._id,
