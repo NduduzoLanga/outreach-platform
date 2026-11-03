@@ -73,8 +73,10 @@ function Workspace() {
                   <Route path="/conferencing" element={<Conferencing />} />
                   <Route path="/earnings" element={<SpecialistEarnings />} />
                 </Route>
-                <Route element={<RoleRoute roles={["consultant"]} />}>
+                <Route element={<RoleRoute roles={["consultant", "specialist"]} />}>
                   <Route path="/withdrawals" element={<Withdrawals />} />
+                </Route>
+                <Route element={<RoleRoute roles={["consultant"]} />}>
                   <Route path="/statements" element={<Statements />} />
                 </Route>
                 <Route element={<RoleRoute roles={["admin"]} />}>

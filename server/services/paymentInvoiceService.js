@@ -77,6 +77,12 @@ function invoiceView(invoice) {
     availableBalanceBefore: invoice.availableBalanceBefore,
     availableBalanceAfter: invoice.availableBalanceAfter,
     issuedAt: invoice.issuedAt,
+    settlementStatus: invoice.settlementStatus,
+    settlementPaidAmount: invoice.settlementPaidAmount,
+    settlementPaidAt: invoice.settlementPaidAt,
+    settlementBalanceBefore: invoice.settlementBalanceBefore,
+    settlementBalanceAfter: invoice.settlementBalanceAfter,
+    settlementEvents: invoice.settlementEvents,
     htmlContent: invoice.htmlContent,
     textContent: invoice.textContent,
   };
@@ -121,6 +127,7 @@ async function createPaymentInvoice({ req, session, entry, recipient, lead = nul
     issuedAt,
     htmlContent: renderInvoiceHtml(details),
     textContent: renderInvoiceText(details),
+    settlementStatus: ['salary', 'referral_additional_incentive'].includes(paymentType) ? 'pending' : 'not_applicable',
   }], { session });
 
   const [message] = await WorkspaceMessage.create([{

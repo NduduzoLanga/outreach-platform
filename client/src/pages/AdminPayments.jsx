@@ -11,6 +11,7 @@ const PAYMENT_TYPES = {
   gratuity_incentive: 'Gratuity incentive',
   salary: 'Salary',
   income_assigned: 'Admin-assigned payment',
+  income_paid: 'Scheduled salary deposited',
   withdrawal_reserved: 'Payout requested',
   withdrawal_approved: 'Payout approved',
   withdrawal_paid: 'Payout processed',
@@ -36,6 +37,7 @@ export default function AdminPayments() {
   const [olderInvoiceCursor, setOlderInvoiceCursor] = useState(null);
   const [loadingOlderInvoices, setLoadingOlderInvoices] = useState(false);
   const [olderInvoiceError, setOlderInvoiceError] = useState('');
+  const [settlementForms, setSettlementForms] = useState({});
   const [busy, setBusy] = useState(false);
   const [olderRows, setOlderRows] = useState([]);
   const [olderCursor, setOlderCursor] = useState(null);
@@ -76,7 +78,7 @@ export default function AdminPayments() {
   const selectedRecipient = recipients.find((user) => user._id === recipientId);
   const rows = [...payments, ...olderRows].filter((entry) => (
     filter === 'all'
-    || (filter === 'income' && ['commission_earned', 'income_assigned'].includes(entry.type))
+    || (filter === 'income' && ['commission_earned', 'income_assigned', 'income_paid'].includes(entry.type))
     || (filter === 'payouts' && entry.type.startsWith('withdrawal_'))
   ));
 
@@ -169,6 +171,39 @@ export default function AdminPayments() {
     }
   }
   const hasOlderInvoices = olderInvoiceCursor === null ? Boolean(invoicePage.nextCursor) : Boolean(olderInvoiceCursor);
+
+  function updateSettlementForm(id, field, value) {
+    setSettlementForms((current) => ({ ...current, [id]: { ...(current[id] || {}), [field]: value } }));
+  }
+
+  async function recordSalaryDeposit(invoice) {
+    const form = settlementForms[invoice._id] || {};
+    setBusy(true);
+    setNotice({ type: '', text: '' });
+    try {
+      const { data } = await API.post(`/admin/payments/invoices/${invoice._id}/settlements`, {
+        actualDepositedAmount: Number(form.amount),
+        confirmDeposit: form.confirmDeposit === true,
+        note: form.note || '',
+      });
+      setNotice({ type: 'success', text: data.message });
+      setInvoicePreview(data.invoice);
+      setSettlementForms((current) => {
+        const next = { ...current };
+        delete next[invoice._id];
+        return next;
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['admin-payments'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-dashboard'] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+      ]);
+    } catch (error) {
+      setNotice({ type: 'error', text: error.response?.data?.message || 'The direct deposit could not be recorded.' });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function downloadInvoice(format) {
     if (!invoicePreview) return;
@@ -295,16 +330,28 @@ export default function AdminPayments() {
         {invoiceRows.length === 0 ? <p className="p-6 text-center text-sm text-slate-500">No qualifying credits have generated invoices yet.</p> : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[780px] text-left text-sm">
-              <thead className="border-b border-slate-200 bg-slate-100 text-[11px] uppercase tracking-wide text-slate-600"><tr><th className="p-3">Invoice</th><th className="p-3">Recipient</th><th className="p-3">Payment type</th><th className="p-3">Amount</th><th className="p-3">Issued</th><th className="p-3">View</th></tr></thead>
+              <thead className="border-b border-slate-200 bg-slate-100 text-[11px] uppercase tracking-wide text-slate-600"><tr><th className="p-3">Invoice</th><th className="p-3">Recipient</th><th className="p-3">Payment type</th><th className="p-3">Amount / settled</th><th className="p-3">Status</th><th className="p-3">Actions</th></tr></thead>
               <tbody className="divide-y divide-slate-100">
                 {invoiceRows.map((invoice) => (
                   <tr className="hover:bg-slate-50" key={invoice._id}>
                     <td className="p-3 font-mono text-xs font-semibold">{invoice.invoiceNumber}</td>
                     <td className="p-3"><p className="font-medium">{invoice.recipientSnapshot?.name}</p><p className="text-xs text-slate-500">{invoice.recipientSnapshot?.employeeId || invoice.recipientSnapshot?.email}</p></td>
                     <td className="p-3 text-xs">{PAYMENT_TYPES[invoice.paymentType] || invoice.paymentType}</td>
-                    <td className="p-3 font-semibold text-emerald-700">{CURRENCY(invoice.amount)}</td>
-                    <td className="p-3 text-xs text-slate-600">{new Date(invoice.issuedAt).toLocaleString('en-ZA')}</td>
-                    <td className="p-3"><button className="rounded border border-slate-300 px-2.5 py-1.5 text-xs font-semibold hover:bg-slate-50" onClick={() => openInvoice(invoice._id)} type="button">View invoice</button></td>
+                    <td className="p-3 font-semibold text-emerald-700">{CURRENCY(invoice.amount)}<p className="text-xs font-normal text-slate-500">Deposited {CURRENCY(invoice.settlementPaidAmount || 0)}</p></td>
+                    <td className="p-3 text-xs capitalize">{invoice.settlementStatus?.replaceAll('_', ' ') || 'Not applicable'}{invoice.settlementPaidAt && <p className="text-slate-500">{new Date(invoice.settlementPaidAt).toLocaleString('en-ZA')}</p>}</td>
+                    <td className="space-y-2 p-3">
+                      <button className="rounded border border-slate-300 px-2.5 py-1.5 text-xs font-semibold hover:bg-slate-50" onClick={() => openInvoice(invoice._id)} type="button">View invoice</button>
+                      {['salary', 'referral_additional_incentive'].includes(invoice.paymentType) && invoice.settlementStatus !== 'paid' && (
+                        <div className="w-72 space-y-2 rounded border border-amber-200 bg-amber-50 p-2">
+                          <label className="block text-xs font-medium text-slate-700">Actual scheduled deposit (R)
+                            <input className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5" max={Number(invoice.amount) - Number(invoice.settlementPaidAmount || 0)} min="0.01" onChange={(event) => updateSettlementForm(invoice._id, 'amount', event.target.value)} step="0.01" type="number" value={settlementForms[invoice._id]?.amount ?? Number(invoice.amount) - Number(invoice.settlementPaidAmount || 0)} />
+                          </label>
+                          <input aria-label="Optional direct deposit note" className="w-full rounded border border-slate-300 px-2 py-1.5 text-xs" maxLength={2000} onChange={(event) => updateSettlementForm(invoice._id, 'note', event.target.value)} placeholder="Optional finance note" value={settlementForms[invoice._id]?.note || ''} />
+                          <label className="flex items-start gap-1.5 text-xs text-slate-700"><input checked={settlementForms[invoice._id]?.confirmDeposit === true} className="mt-0.5" onChange={(event) => updateSettlementForm(invoice._id, 'confirmDeposit', event.target.checked)} type="checkbox" /><span>I verified this amount was deposited to the employee’s account.</span></label>
+                          <button className="rounded bg-institute-forest px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50" disabled={busy || settlementForms[invoice._id]?.confirmDeposit !== true} onClick={() => recordSalaryDeposit(invoice)} type="button">Record deposit</button>
+                        </div>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -316,7 +363,7 @@ export default function AdminPayments() {
         {invoicePreview && (
           <div className="space-y-3 border-t border-slate-200 p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div><h3 className="font-bold text-slate-900">Invoice preview · {invoicePreview.invoiceNumber}</h3><p className="text-xs text-slate-500">This is the same invoice available to the credited employee in their Invoices section.</p></div>
+              <div><h3 className="font-bold text-slate-900">Invoice preview · {invoicePreview.invoiceNumber}</h3><p className="text-xs text-slate-500">This is the same invoice available to the credited employee in their Invoices section. {invoicePreview.settlementStatus && invoicePreview.settlementStatus !== 'not_applicable' ? `Scheduled deposit status: ${invoicePreview.settlementStatus.replaceAll('_', ' ')}; deposited ${CURRENCY(invoicePreview.settlementPaidAmount || 0)} of ${CURRENCY(invoicePreview.amount)}.` : ''}</p></div>
               <div className="flex gap-2">
                 <button className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50" onClick={() => downloadInvoice('html')} type="button">Download HTML</button>
                 <button className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50" onClick={() => downloadInvoice('txt')} type="button">Download TXT</button>
@@ -355,7 +402,7 @@ export default function AdminPayments() {
                       <td className="whitespace-nowrap p-3 text-xs text-slate-600">{new Date(entry.createdAt).toLocaleString('en-ZA')}</td>
                       <td className="p-3"><p className="font-semibold text-slate-900">{entry.consultant?.name || 'Former account'}</p><p className="text-xs text-slate-500">{entry.consultant?.employeeId ? `${entry.consultant.employeeId} · ` : ''}{entry.consultant?.email || '—'}{entry.lead ? ` · ${paymentLeadName(entry.lead)}` : ''}</p></td>
                       <td className="p-3"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{PAYMENT_TYPES[entry.incentiveType] || PAYMENT_TYPES[entry.type] || entry.type}</span>{payout && <p className="mt-1 text-xs text-slate-600">Status: {payout.status}</p>}</td>
-                      <td className={`whitespace-nowrap p-3 font-bold ${entry.type.startsWith('withdrawal_') ? 'text-amber-700' : 'text-emerald-700'}`}>{CURRENCY(entry.amount)}</td>
+                      <td className={`whitespace-nowrap p-3 font-bold ${entry.type.startsWith('withdrawal_') || entry.type === 'income_paid' ? 'text-amber-700' : 'text-emerald-700'}`}>{CURRENCY(entry.amount)}</td>
                       <td className="whitespace-nowrap p-3 text-xs text-slate-600">{CURRENCY(entry.availableBalanceBefore)} <span aria-hidden="true">→</span> <strong className="text-slate-800">{CURRENCY(entry.availableBalanceAfter)}</strong></td>
                       <td className="max-w-xs p-3 text-xs text-slate-600">
                         {payout ? (
@@ -370,7 +417,7 @@ export default function AdminPayments() {
                             </div>
                           </details>
                         ) : (
-                          <div>{entry.lead?.dealPackage ? <p>Package: {entry.lead.dealPackage.replaceAll('_', ' ')}</p> : null}{entry.assignmentReason && <p className="whitespace-normal">Reason: {entry.assignmentReason}</p>}</div>
+                          <div>{entry.lead?.dealPackage ? <p>Package: {entry.lead.dealPackage.replaceAll('_', ' ')}</p> : null}{entry.paymentInvoice?.invoiceNumber && <p>Invoice: {entry.paymentInvoice.invoiceNumber}</p>}{entry.assignmentReason && <p className="whitespace-normal">Reason: {entry.assignmentReason}</p>}</div>
                         )}
                       </td>
                       <td className="p-3 text-xs text-slate-600">{entry.actor?.name || entry.actor?.email || 'System'}<p className="text-slate-400">{entry.actor?.role || ''}</p></td>

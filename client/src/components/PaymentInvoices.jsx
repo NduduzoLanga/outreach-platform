@@ -85,7 +85,7 @@ export default function PaymentInvoices() {
             <article className={`flex flex-wrap items-center justify-between gap-3 px-5 py-4 ${selectedId === invoice._id ? 'bg-emerald-50/60' : ''}`} key={invoice._id}>
               <div>
                 <p className="font-semibold text-slate-900">{invoice.invoiceNumber} <span className="font-normal text-slate-500">· {currency(invoice.amount)}</span></p>
-                <p className="mt-1 text-xs text-slate-600">{PAYMENT_LABELS[invoice.paymentType] || 'Platform payment'} · {new Date(invoice.issuedAt).toLocaleDateString('en-ZA')}{invoice.referenceSnapshot ? ` · ${invoice.referenceSnapshot}` : ''}</p>
+                <p className="mt-1 text-xs text-slate-600">{PAYMENT_LABELS[invoice.paymentType] || 'Platform payment'} · {new Date(invoice.issuedAt).toLocaleDateString('en-ZA')}{invoice.referenceSnapshot ? ` · ${invoice.referenceSnapshot}` : ''}{invoice.settlementStatus && invoice.settlementStatus !== 'not_applicable' ? ` · ${invoice.settlementStatus.replaceAll('_', ' ')} (${currency(invoice.settlementPaidAmount || 0)} deposited)` : ''}</p>
               </div>
               <button className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50" onClick={() => setSelectedId(invoice._id)} type="button">View / download</button>
             </article>
@@ -106,6 +106,7 @@ export default function PaymentInvoices() {
                 </div>
               </div>
               <iframe className="h-[560px] w-full rounded-lg border border-slate-200 bg-white" sandbox="" srcDoc={selected.htmlContent} title={`Invoice ${selected.invoiceNumber}`} />
+              {selected.settlementEvents?.length > 0 && <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600"><p className="font-semibold text-slate-800">Scheduled deposit history</p><ol className="mt-2 space-y-1">{selected.settlementEvents.map((event, index) => <li key={`${event.createdAt}-${index}`}>R{Number(event.amount).toLocaleString('en-ZA', { minimumFractionDigits: 2 })} deposited · {new Date(event.createdAt).toLocaleString('en-ZA')}{event.actor?.name ? ` · ${event.actor.name}` : ''}{event.note ? ` · ${event.note}` : ''}</li>)}</ol></div>}
             </div>
           )}
         </div>

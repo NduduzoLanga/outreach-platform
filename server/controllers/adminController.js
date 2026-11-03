@@ -5,6 +5,7 @@ const Lead = require('../models/Lead');
 const Withdrawal = require('../models/Withdrawal');
 const Ticket = require('../models/Ticket');
 const LedgerEntry = require('../models/LedgerEntry');
+const PaymentInvoice = require('../models/PaymentInvoice');
 const WorkspaceMessage = require('../models/WorkspaceMessage');
 const AuditLog = require('../models/AuditLog');
 const Agency = require('../models/Agency');
@@ -141,9 +142,10 @@ const getAdminPayments = async (req, res) => {
     }
 
     const records = await LedgerEntry.find(filter)
-      .select('consultant withdrawal lead actor type incentiveType amount availableBalanceBefore availableBalanceAfter payoutSnapshot assignmentReason createdAt')
+      .select('consultant withdrawal lead paymentInvoice actor type incentiveType amount availableBalanceBefore availableBalanceAfter payoutSnapshot assignmentReason createdAt')
       .populate('consultant', 'name email role employeeId')
       .populate('lead', 'clientName centerName dealPackage stage commissionEarned commissionCreditedAt')
+      .populate('paymentInvoice', 'invoiceNumber paymentType settlementStatus')
       .populate({
         path: 'withdrawal',
         select: 'amount status payoutSnapshot adminNotes processedAt statusEvents createdAt',
@@ -652,7 +654,7 @@ const updateUserRole = async (req, res) => {
 
 const processWithdrawal = async (req, res) => {
   try {
-    const { status, adminNotes } = req.body;
+    const { status, adminNotes, actualDepositedAmount, confirmDeposit } = req.body;
     if (!['Approved', 'Processed', 'Rejected'].includes(status)) {
       return res.status(400).json({ message: 'Invalid withdrawal status.' });
     }
@@ -661,6 +663,19 @@ const processWithdrawal = async (req, res) => {
     }
     if (adminNotes !== undefined && (typeof adminNotes !== 'string' || adminNotes.length > 2000)) {
       return res.status(400).json({ message: 'Admin notes must be text under 2,000 characters.' });
+    }
+    if (status === 'Rejected' && (typeof adminNotes !== 'string' || adminNotes.trim().length < 10)) {
+      return res.status(400).json({ message: 'Document a rejection reason of at least 10 characters.' });
+    }
+    let depositedAmount;
+    if (status === 'Processed') {
+      depositedAmount = Number(actualDepositedAmount);
+      if (confirmDeposit !== true) {
+        return res.status(400).json({ message: 'Confirm the deposit checkbox after verifying the bank transfer.' });
+      }
+      if (!Number.isFinite(depositedAmount) || depositedAmount <= 0 || !isCentAmount(depositedAmount)) {
+        return res.status(400).json({ message: 'Enter the actual amount deposited, in cents.' });
+      }
     }
 
     const updated = await runInTransaction(async (session) => {
@@ -688,16 +703,40 @@ const processWithdrawal = async (req, res) => {
         error.statusCode = 409;
         throw error;
       }
+      if (status === 'Processed' && depositedAmount > withdrawal.amount) {
+        const error = new Error('The confirmed deposit cannot exceed the amount originally requested.');
+        error.statusCode = 400;
+        throw error;
+      }
       const balanceBefore = consultant.balance;
       if (status === 'Rejected') {
         consultant.balance = toCurrency(consultant.balance + withdrawal.amount);
         await consultant.save({ session });
       }
 
+      const eventAt = new Date();
       withdrawal.status = status;
       if (adminNotes !== undefined) withdrawal.adminNotes = adminNotes;
-      if (status === 'Processed') withdrawal.processedAt = new Date();
-      withdrawal.statusEvents.push({ status, actor: req.user._id, note: adminNotes || '' });
+      if (status === 'Approved') withdrawal.approvedAt = eventAt;
+      if (status === 'Rejected') withdrawal.rejectedAt = eventAt;
+      if (status === 'Processed') {
+        const refundAmount = toCurrency(withdrawal.amount - depositedAmount);
+        if (refundAmount > 0) {
+          consultant.balance = toCurrency(consultant.balance + refundAmount);
+          await consultant.save({ session });
+        }
+        withdrawal.actualPaidAmount = depositedAmount;
+        withdrawal.processedAt = eventAt;
+        withdrawal.paidAt = eventAt;
+        withdrawal.clearedAt = eventAt;
+      }
+      withdrawal.statusEvents.push({
+        status,
+        actor: req.user._id,
+        note: adminNotes || '',
+        ...(status === 'Processed' ? { amount: depositedAmount } : {}),
+        createdAt: eventAt,
+      });
       await withdrawal.save({ session });
 
       const ledgerType = status === 'Approved'
@@ -711,10 +750,38 @@ const processWithdrawal = async (req, res) => {
         withdrawal: withdrawal._id,
         actor: req.user._id,
         type: ledgerType,
-        amount: withdrawal.amount,
+        amount: status === 'Processed' ? depositedAmount : withdrawal.amount,
         availableBalanceBefore: balanceBefore,
-        availableBalanceAfter: consultant.balance,
+        availableBalanceAfter: status === 'Processed' ? balanceBefore : consultant.balance,
         payoutSnapshot: withdrawal.payoutSnapshot,
+      }], { session });
+      if (status === 'Processed' && depositedAmount < withdrawal.amount) {
+        await LedgerEntry.create([{
+          tenantId: req.tenantId,
+          consultant: consultant._id,
+          withdrawal: withdrawal._id,
+          actor: req.user._id,
+          type: 'withdrawal_refunded',
+          amount: toCurrency(withdrawal.amount - depositedAmount),
+          availableBalanceBefore: balanceBefore,
+          availableBalanceAfter: consultant.balance,
+          payoutSnapshot: withdrawal.payoutSnapshot,
+        }], { session });
+      }
+      const notificationText = status === 'Approved'
+        ? `Your withdrawal request for R${withdrawal.amount.toFixed(2)} was approved. Finance will process the transfer to ${withdrawal.payoutSnapshot?.bankName || 'your registered bank account'}.`
+        : status === 'Rejected'
+          ? `Your withdrawal request for R${withdrawal.amount.toFixed(2)} was rejected. Reason: ${adminNotes.trim()}. The reserved funds have been returned to your platform balance.`
+          : `Your withdrawal request was paid and cleared. Requested: R${withdrawal.amount.toFixed(2)}; amount deposited: R${depositedAmount.toFixed(2)}.${depositedAmount < withdrawal.amount ? ` The undeposited balance of R${toCurrency(withdrawal.amount - depositedAmount).toFixed(2)} was returned to your account.` : ''}`;
+      await WorkspaceMessage.create([{
+        tenantId: req.tenantId,
+        type: 'withdrawal_updated',
+        title: `Withdrawal ${status.toLowerCase()}`,
+        body: notificationText,
+        withdrawal: withdrawal._id,
+        recipientIds: [consultant._id],
+        audience: 'selected_users',
+        createdBy: req.user._id,
       }], { session });
       await writeAuditLog({
         req,
@@ -722,12 +789,122 @@ const processWithdrawal = async (req, res) => {
         resourceType: 'Withdrawal',
         resourceId: withdrawal._id,
         before: { status: previousStatus, balance: balanceBefore },
-        after: { status, balance: consultant.balance, adminNotes: withdrawal.adminNotes },
+        after: {
+          status,
+          balance: consultant.balance,
+          adminNotes: withdrawal.adminNotes,
+          ...(status === 'Processed' ? { actualPaidAmount: depositedAmount, paidAt: withdrawal.paidAt, clearedAt: withdrawal.clearedAt } : {}),
+        },
         session,
       });
       return withdrawal;
     });
     return res.json({ message: `Withdrawal status updated to ${status}`, withdrawal: updated });
+  } catch (error) {
+    return respondWithControllerError(req, res, error);
+  }
+};
+
+const settleIncomeInvoice = async (req, res) => {
+  try {
+    const actualDepositedAmount = Number(req.body.actualDepositedAmount);
+    const { confirmDeposit, note = '' } = req.body;
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid invoice ID.' });
+    if (confirmDeposit !== true) return res.status(400).json({ message: 'Confirm the deposit checkbox after verifying the bank transfer.' });
+    if (!Number.isFinite(actualDepositedAmount) || actualDepositedAmount <= 0 || !isCentAmount(actualDepositedAmount)) {
+      return res.status(400).json({ message: 'Enter the actual amount deposited, in cents.' });
+    }
+    if (typeof note !== 'string' || note.length > 2000) return res.status(400).json({ message: 'Payment note must be text under 2,000 characters.' });
+
+    const result = await runInTransaction(async (session) => {
+      const invoice = await PaymentInvoice.findById(req.params.id).session(session);
+      if (!invoice) {
+        const error = new Error('Payment invoice not found.');
+        error.statusCode = 404;
+        throw error;
+      }
+      if (!['salary', 'referral_additional_incentive'].includes(invoice.paymentType)) {
+        const error = new Error('Only salary and referral incentive invoices can be settled as scheduled direct deposits.');
+        error.statusCode = 409;
+        throw error;
+      }
+      const remainingAmount = toCurrency(invoice.amount - invoice.settlementPaidAmount);
+      if (actualDepositedAmount > remainingAmount) {
+        const error = new Error(`The deposit cannot exceed the remaining invoice amount of R${remainingAmount.toFixed(2)}.`);
+        error.statusCode = 400;
+        throw error;
+      }
+      const recipient = await User.findById(invoice.recipient).session(session);
+      if (!recipient) {
+        const error = new Error('The recipient account for this invoice no longer exists.');
+        error.statusCode = 409;
+        throw error;
+      }
+      const balanceBefore = toCurrency(recipient.balance);
+      if (balanceBefore < actualDepositedAmount) {
+        const error = new Error(`Insufficient platform balance to record this deposit. Current balance: R${balanceBefore.toFixed(2)}.`);
+        error.statusCode = 409;
+        throw error;
+      }
+      recipient.balance = toCurrency(balanceBefore - actualDepositedAmount);
+      await recipient.save({ session });
+
+      const now = new Date();
+      invoice.settlementPaidAmount = toCurrency(invoice.settlementPaidAmount + actualDepositedAmount);
+      invoice.settlementBalanceBefore = balanceBefore;
+      invoice.settlementBalanceAfter = recipient.balance;
+      invoice.settlementStatus = invoice.settlementPaidAmount >= invoice.amount ? 'paid' : 'partially_paid';
+      if (invoice.settlementStatus === 'paid') invoice.settlementPaidAt = now;
+      invoice.settlementEvents.push({
+        amount: actualDepositedAmount,
+        actor: req.user._id,
+        note: note.trim(),
+        createdAt: now,
+      });
+      await invoice.save({ session });
+
+      const [ledgerEntry] = await LedgerEntry.create([{
+        tenantId: req.tenantId,
+        consultant: recipient._id,
+        paymentInvoice: invoice._id,
+        actor: req.user._id,
+        type: 'income_paid',
+        incentiveType: invoice.paymentType,
+        amount: actualDepositedAmount,
+        availableBalanceBefore: balanceBefore,
+        availableBalanceAfter: recipient.balance,
+        assignmentReason: note.trim() || `Direct deposit recorded for invoice ${invoice.invoiceNumber}.`,
+      }], { session });
+      await invoice.populate('settlementEvents.actor', 'name email');
+      await WorkspaceMessage.create([{
+        tenantId: req.tenantId,
+        type: 'income_paid',
+        title: invoice.settlementStatus === 'paid' ? 'Your scheduled payment was deposited' : 'A partial scheduled payment was deposited',
+        body: `R${actualDepositedAmount.toFixed(2)} was deposited to your registered account for invoice ${invoice.invoiceNumber}. Total deposited: R${invoice.settlementPaidAmount.toFixed(2)} of R${invoice.amount.toFixed(2)}.${note.trim() ? ` Finance note: ${note.trim()}` : ''}${invoice.settlementStatus === 'paid' ? ' This invoice is now fully paid.' : ` Remaining amount: R${toCurrency(invoice.amount - invoice.settlementPaidAmount).toFixed(2)}.`}`,
+        invoice: invoice._id,
+        recipientIds: [recipient._id],
+        audience: 'selected_users',
+        createdBy: req.user._id,
+      }], { session });
+      await writeAuditLog({
+        req,
+        action: 'income.invoice_settled',
+        resourceType: 'PaymentInvoice',
+        resourceId: invoice._id,
+        before: { settlementPaidAmount: invoice.settlementPaidAmount - actualDepositedAmount, recipientBalance: balanceBefore },
+        after: {
+          invoiceNumber: invoice.invoiceNumber,
+          amountDeposited: actualDepositedAmount,
+          settlementPaidAmount: invoice.settlementPaidAmount,
+          settlementStatus: invoice.settlementStatus,
+          recipientBalance: recipient.balance,
+          ledgerEntry: ledgerEntry._id,
+        },
+        session,
+      });
+      return invoice;
+    });
+    return res.json({ message: 'Deposit recorded and invoice settlement updated.', invoice: result });
   } catch (error) {
     return respondWithControllerError(req, res, error);
   }
@@ -937,6 +1114,7 @@ module.exports = {
   getAuditLogs,
   updateUserRole,
   processWithdrawal,
+  settleIncomeInvoice,
   assignLeadSpecialist,
   getAdminTickets,
   updateTicketStatus,

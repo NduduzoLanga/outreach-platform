@@ -10,6 +10,7 @@ const {
   getAuditLogs,
   updateUserRole,
   processWithdrawal,
+  settleIncomeInvoice,
   assignLeadSpecialist,
   getAdminTickets,
   updateTicketStatus,
@@ -29,6 +30,7 @@ router.get('/users', getUsers);
 router.get('/payments', getAdminPayments);
 router.get('/payments/invoices', getAdminInvoices);
 router.get('/payments/invoices/:id', getAdminInvoice);
+router.post('/payments/invoices/:id/settlements', settleIncomeInvoice);
 router.post('/payments/assign-income', assignIncome);
 router.post('/announcements', createAnnouncement);
 router.post('/users/invitations', createUserInvitation);

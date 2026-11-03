@@ -46,6 +46,10 @@ export default function Withdrawals() {
     queryKey: ['withdrawals'],
     queryFn: async () => (await API.get('/withdrawals')).data,
   });
+  const availabilityQuery = useQuery({
+    queryKey: ['withdrawal-availability'],
+    queryFn: async () => (await API.get('/withdrawals/availability')).data,
+  });
   const ledgerQuery = useQuery({
     queryKey: ['withdrawal-ledger'],
     queryFn: async () => (await API.get('/withdrawals/ledger')).data,
@@ -67,6 +71,7 @@ export default function Withdrawals() {
       reset({ amount: '' });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['withdrawals'] }),
+        queryClient.invalidateQueries({ queryKey: ['withdrawal-availability'] }),
         queryClient.invalidateQueries({ queryKey: ['withdrawal-ledger'] }),
         queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
         queryClient.invalidateQueries({ queryKey: ['current-profile'] }),
@@ -86,25 +91,28 @@ export default function Withdrawals() {
   });
   const currentUser = profileQuery.data || user;
   const hasBankDetails = Boolean(currentUser?.bankDetails?.bankName && currentUser?.bankDetails?.accountNumber);
-  const balance = Number(currentUser?.balance || 0);
+  const balance = Number(availabilityQuery.data?.withdrawableBalance ?? 0);
+  const lockedSalaryBalance = Number(availabilityQuery.data?.lockedSalaryBalance || 0);
 
   return (
     <section className="mx-auto max-w-7xl space-y-6 p-2 sm:p-6">
       <header>
         <h1 className="text-2xl font-bold text-slate-800">Withdrawals &amp; Earnings</h1>
-        <p className="text-sm text-slate-500">Request payouts and monitor transaction status.</p>
+        <p className="text-sm text-slate-500">Request eligible payouts and follow each review, payment, and clearance timestamp.</p>
       </header>
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
         <article className="rounded-xl bg-gradient-to-br from-slate-900 to-slate-800 p-6 text-white shadow-sm">
           <div className="mb-2 flex items-center justify-between text-slate-300">
-            <span className="text-sm font-medium">Available Balance</span>
+            <span className="text-sm font-medium">Available to withdraw</span>
             <Wallet aria-hidden="true" className="text-emerald-400" size={20} />
           </div>
           <p className="text-3xl font-extrabold">
             R{balance.toLocaleString('en-ZA', { minimumFractionDigits: 2 })}
           </p>
-          <p className="mt-2 text-xs text-slate-400">Available for payout requests.</p>
+          {availabilityQuery.isLoading && <p className="mt-1 text-xs text-slate-400">Calculating available payout balance…</p>}
+          <p className="mt-2 text-xs text-slate-400">Withdrawable balance after any role-based salary holdbacks.</p>
+          {lockedSalaryBalance > 0 && <p className="mt-2 rounded-lg bg-white/10 p-2 text-xs text-amber-100">R{lockedSalaryBalance.toLocaleString('en-ZA', { minimumFractionDigits: 2 })} is reserved for referral incentive / salary payment and cannot be withdrawn here.</p>}
         </article>
 
         <article className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -136,7 +144,7 @@ export default function Withdrawals() {
             <label className="sr-only" htmlFor="withdrawal-amount">Withdrawal amount</label>
             <input
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
-              disabled={!hasBankDetails || isSubmitting || requestWithdrawal.isPending}
+              disabled={!hasBankDetails || balance <= 0 || isSubmitting || requestWithdrawal.isPending}
               id="withdrawal-amount"
               max={balance}
               min="0.01"
@@ -148,7 +156,7 @@ export default function Withdrawals() {
             {errors.amount && <p className="text-xs text-rose-600">{errors.amount.message}</p>}
             <button
               className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:opacity-50"
-              disabled={isSubmitting || requestWithdrawal.isPending || !hasBankDetails}
+              disabled={isSubmitting || requestWithdrawal.isPending || !hasBankDetails || balance <= 0}
               type="submit"
             >
               <ArrowUpRight aria-hidden="true" size={16} />
@@ -169,6 +177,7 @@ export default function Withdrawals() {
         </p>
       )}
       {profileQuery.error && <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" role="alert">{profileQuery.error.response?.data?.message || 'Your latest profile and balance could not be refreshed. The server will still validate the available balance when you request a payout.'}<button className="ml-3 font-semibold underline" onClick={() => profileQuery.refetch()} type="button">Retry</button></p>}
+      {availabilityQuery.error && <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" role="alert">{availabilityQuery.error.response?.data?.message || 'Withdrawable balance details could not be loaded.'}<button className="ml-3 font-semibold underline" onClick={() => availabilityQuery.refetch()} type="button">Retry</button></p>}
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 bg-slate-50 px-6 py-4">
@@ -191,7 +200,7 @@ export default function Withdrawals() {
                   <th className="p-4">Date</th>
                   <th className="p-4">Amount</th>
                   <th className="p-4">Bank Snapshot</th>
-                  <th className="p-4">Status</th>
+                  <th className="p-4">Status &amp; details</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 text-sm">
@@ -210,7 +219,21 @@ export default function Withdrawals() {
                     <td className="p-4 text-xs text-slate-500">
                       {item.payoutSnapshot?.bankName || 'N/A'} (••• {item.payoutSnapshot?.accountNumber?.slice(-4) || 'N/A'})
                     </td>
-                    <td className="p-4"><StatusBadge status={item.status} /></td>
+                    <td className="p-4">
+                      <StatusBadge status={item.status} />
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-xs font-semibold text-institute-forest">Timeline &amp; details</summary>
+                        <div className="mt-2 min-w-64 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                          <p><strong>Requested:</strong> {new Date(item.createdAt).toLocaleString('en-ZA')}</p>
+                          <p><strong>Approved:</strong> {item.approvedAt ? new Date(item.approvedAt).toLocaleString('en-ZA') : 'Pending'}</p>
+                          <p><strong>Paid:</strong> {item.paidAt ? new Date(item.paidAt).toLocaleString('en-ZA') : 'Not yet paid'}</p>
+                          <p><strong>Cleared:</strong> {item.clearedAt ? new Date(item.clearedAt).toLocaleString('en-ZA') : 'Not yet cleared'}</p>
+                          {item.actualPaidAmount != null && <p><strong>Amount deposited:</strong> R{Number(item.actualPaidAmount).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</p>}
+                          {item.adminNotes && <p className="mt-1 whitespace-pre-wrap"><strong>Finance explanation:</strong> {item.adminNotes}</p>}
+                          <ol className="mt-2 space-y-1 border-t border-slate-200 pt-2">{(item.statusEvents || []).map((event, index) => <li key={`${event.status}-${event.createdAt}-${index}`}><strong>{event.status}:</strong> {new Date(event.createdAt).toLocaleString('en-ZA')}{event.amount != null ? ` · R${Number(event.amount).toFixed(2)} deposited` : ''}{event.note ? ` · ${event.note}` : ''}</li>)}</ol>
+                        </div>
+                      </details>
+                    </td>
                   </tr>
                 ))}
               </tbody>

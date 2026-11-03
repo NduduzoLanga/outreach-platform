@@ -36,7 +36,7 @@ Keep `server/.env` untracked. The committed `server/.env.example` contains place
 ## Access model
 
 - **Consultant:** captures leads, can edit/delete unassigned leads, requests payouts, and views own statements/support tickets.
-- **Specialist:** claims unassigned leads and manages assigned pipeline stages, stage reports, scheduled meetings, and negotiation activity. Specialists see only their assigned leads and the unassigned queue, with separate filters for assigned, available, and combined work.
+- **Specialist:** claims unassigned leads and manages assigned pipeline stages, stage reports, scheduled meetings, and negotiation activity. Specialists see only their assigned leads and the unassigned queue, with separate filters for assigned, available, and combined work. They may request withdrawals from eligible earnings; referral-incentive and salary credits are reserved for administrator-managed scheduled deposits.
 - **Admin:** manages roles and assignments, processes payout transitions, handles support tickets, and views tenant-wide metrics and audit activity. Separate Payments and User Register workspaces provide the transaction ledger and complete people directory.
 - **Messages:** every account can read workspace announcements and account-specific notices; administrators can publish announcements to the full tenant.
 
@@ -68,7 +68,7 @@ Consultant statements are month-filtered and include itemized referral records, 
 
 Tenant isolation is applied in the Mongoose persistence layer using request-bound tenant context, query/update scoping, and tenant-aware indexes. MongoDB does not provide PostgreSQL-style row-level security; this is not database-native RLS. Keep all tenant model access behind the authenticated tenant middleware, use least-privilege database credentials, and review any new aggregation, raw collection, or bulk-write code for tenant isolation.
 
-Payout requests reserve the consultant balance immediately. Approval, payment, or rejection appends a ledger record; rejection refunds the reserved amount. These transitions run in MongoDB transactions and depend on Atlas or replica-set transaction support.
+Payout requests from consultants and specialists reserve withdrawable balance immediately and create an admin-only in-platform notification containing the payout destination. Salary credits are held for scheduled administrator deposits, and lead specialists also have referral-incentive credits held back from self-service withdrawals. Admins must document a reason to reject, enter the actual deposit amount, and confirm a checkbox before marking a withdrawal complete; partial underpayments are returned to available balance and reflected as separate immutable ledger entries. Request, approval, rejection, payment, and clearance timestamps are retained with each withdrawal. These transitions and salary settlements run in MongoDB transactions and depend on Atlas or replica-set transaction support.
 
 Audit and ledger records reject mutation through the Mongoose model middleware. This application-level guard is not immutable against direct database access: production database roles and operational controls must prevent the API identity from modifying or deleting those collections, and backups/retention should be configured separately.
 

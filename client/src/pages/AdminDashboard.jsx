@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { AlertTriangle, CheckCircle, DollarSign, Target, Users, XCircle } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -31,6 +31,7 @@ export default function AdminDashboard() {
   const queryClient = useQueryClient();
   const [ticketReplies, setTicketReplies] = useState({});
   const [assignmentReasons, setAssignmentReasons] = useState({});
+  const [withdrawalForms, setWithdrawalForms] = useState({});
   const [error, setError] = useState('');
   const [busyKey, setBusyKey] = useState('');
   const [notice, setNotice] = useState('');
@@ -127,7 +128,35 @@ export default function AdminDashboard() {
     }
   }
 
-  const pendingWithdrawals = withdrawals.filter((withdrawal) => ['Pending', 'Approved'].includes(withdrawal.status));
+  const recentWithdrawals = withdrawals.slice(0, 50);
+  const updateWithdrawalForm = (id, field, value) => setWithdrawalForms((current) => ({
+    ...current,
+    [id]: { ...(current[id] || {}), [field]: value },
+  }));
+  async function submitWithdrawalStatus(withdrawal, status) {
+    const form = withdrawalForms[withdrawal._id] || {};
+    const payload = {
+      status,
+      ...(status === 'Rejected' ? { adminNotes: form.rejectionReason || '' } : {}),
+      ...(status === 'Processed' ? {
+        actualDepositedAmount: Number(form.actualDepositedAmount),
+        confirmDeposit: form.confirmDeposit === true,
+        adminNotes: form.paymentNote || '',
+      } : {}),
+    };
+    const completed = await runAction(
+      withdrawal._id,
+      () => API.put(`/admin/withdrawals/${withdrawal._id}/status`, payload),
+      status === 'Processed' ? 'Deposit confirmed and withdrawal completed.' : status === 'Rejected' ? 'Withdrawal rejected and reserved funds returned.' : 'Withdrawal approved.'
+    );
+    if (completed) {
+      setWithdrawalForms((current) => {
+        const next = { ...current };
+        delete next[withdrawal._id];
+        return next;
+      });
+    }
+  }
   const specialists = users.filter((user) => user.role === 'specialist');
   const leadStageData = ['New', 'Contacted', 'In Progress', 'Proposal Sent', 'Closed Won', 'Closed Lost']
     .map((stage) => ({ stage, count: leads.filter((lead) => lead.stage === stage).length }));
@@ -364,66 +393,93 @@ export default function AdminDashboard() {
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <header className="border-b border-slate-200 bg-slate-50 px-6 py-4">
           <h2 className="text-sm font-bold text-slate-800">Payout Requests</h2>
-          <p className="mt-1 text-xs text-slate-500">Approve requests, mark approved payments as processed, or reject and return reserved funds.</p>
+          <p className="mt-1 text-xs text-slate-500">Review consultant and specialist requests. Confirm the actual bank deposit before completion, or document a rejection reason.</p>
         </header>
-        {pendingWithdrawals.length === 0 ? (
-          <p className="p-8 text-center text-sm text-slate-500">No payout requests need action.</p>
+        {recentWithdrawals.length === 0 ? (
+          <p className="p-8 text-center text-sm text-slate-500">No payout requests or payout history yet.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="border-b border-slate-200 bg-slate-100 text-xs uppercase text-slate-600">
                 <tr>
-                  <th className="p-4">Consultant</th>
+                  <th className="p-4">Account holder</th>
                   <th className="p-4">Amount</th>
                   <th className="p-4">Payout Destination</th>
                   <th className="p-4">Status</th>
-                  <th className="p-4 text-right">Actions</th>
+                  <th className="p-4">Review / actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
-                {pendingWithdrawals.map((withdrawal) => (
-                  <tr key={withdrawal._id}>
+                {recentWithdrawals.map((withdrawal) => (
+                  <Fragment key={withdrawal._id}>
+                  <tr>
                     <td className="p-4">
                       <p className="font-semibold text-slate-800">{withdrawal.consultant?.name || withdrawal.payoutSnapshot?.accountHolder}</p>
-                      <p className="text-xs text-slate-500">{withdrawal.consultant?.email}</p>
+                      <p className="text-xs text-slate-500">{withdrawal.consultant?.email} · {withdrawal.consultant?.role === 'specialist' ? 'Lead specialist' : 'Consultant'}</p>
                     </td>
                     <td className="p-4 font-bold text-emerald-700">
                       R{Number(withdrawal.amount).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}
                     </td>
-                    <td className="p-4 text-xs text-slate-500">
-                      {withdrawal.payoutSnapshot?.bankName} · •••• {withdrawal.payoutSnapshot?.accountNumber?.slice(-4)}
-                    </td>
+                    <td className="p-4 text-xs text-slate-500">{withdrawal.payoutSnapshot?.bankName} · account ending {withdrawal.payoutSnapshot?.accountNumber?.slice(-4)}</td>
                     <td className="p-4">{withdrawal.status}</td>
-                    <td className="space-x-2 p-4 text-right">
+                    <td className="min-w-[300px] space-y-2 p-4">
                       {withdrawal.status === 'Pending' ? (
                         <button
                           className="rounded bg-institute-forest px-3 py-1.5 text-xs font-medium text-white hover:bg-institute-deep disabled:opacity-50"
                           disabled={busyKey === withdrawal._id}
-                          onClick={() => runAction(withdrawal._id, () => API.put(`/admin/withdrawals/${withdrawal._id}/status`, { status: 'Approved' }), 'Payout approved.')}
+                          onClick={() => submitWithdrawalStatus(withdrawal, 'Approved')}
                           type="button"
                         >
                           Approve
                         </button>
-                      ) : (
-                        <button
-                          className="inline-flex items-center gap-1 rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-                          disabled={busyKey === withdrawal._id}
-                          onClick={() => runAction(withdrawal._id, () => API.put(`/admin/withdrawals/${withdrawal._id}/status`, { status: 'Processed' }), 'Payout marked as processed.')}
-                          type="button"
-                        >
-                          <CheckCircle aria-hidden="true" size={13} /> Mark Paid
-                        </button>
+                      ) : withdrawal.status === 'Approved' ? (
+                        <div className="space-y-2 rounded-lg border border-emerald-100 bg-emerald-50/50 p-3">
+                          <label className="block text-xs font-medium text-slate-700">Actual amount deposited (R)
+                            <input className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5" max={withdrawal.amount} min="0.01" onChange={(event) => updateWithdrawalForm(withdrawal._id, 'actualDepositedAmount', event.target.value)} step="0.01" type="number" value={withdrawalForms[withdrawal._id]?.actualDepositedAmount ?? withdrawal.amount} />
+                          </label>
+                          <label className="flex items-start gap-2 text-xs text-slate-700">
+                            <input checked={withdrawalForms[withdrawal._id]?.confirmDeposit === true} className="mt-0.5" onChange={(event) => updateWithdrawalForm(withdrawal._id, 'confirmDeposit', event.target.checked)} type="checkbox" />
+                            <span>I confirm I verified this bank deposit and the amount above is the amount actually paid.</span>
+                          </label>
+                          <button
+                            className="inline-flex items-center gap-1 rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                            disabled={busyKey === withdrawal._id || withdrawalForms[withdrawal._id]?.confirmDeposit !== true}
+                            onClick={() => submitWithdrawalStatus(withdrawal, 'Processed')}
+                            type="button"
+                          >
+                            <CheckCircle aria-hidden="true" size={13} /> Confirm deposit &amp; complete
+                          </button>
+                        </div>
+                      ) : <p className="text-xs text-slate-500">{withdrawal.status === 'Processed' ? `Paid R${Number(withdrawal.actualPaidAmount ?? withdrawal.amount).toFixed(2)}` : `Rejected${withdrawal.rejectedAt ? ` · ${new Date(withdrawal.rejectedAt).toLocaleDateString('en-ZA')}` : ''}`}</p>}
+                      {['Pending', 'Approved'].includes(withdrawal.status) && (
+                        <>
+                          <label className="block text-xs font-medium text-slate-700">Rejection explanation (required to reject)
+                            <textarea className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5" maxLength={2000} minLength={10} onChange={(event) => updateWithdrawalForm(withdrawal._id, 'rejectionReason', event.target.value)} placeholder="Explain why this request cannot be approved" rows={2} value={withdrawalForms[withdrawal._id]?.rejectionReason || ''} />
+                          </label>
+                          <button
+                            className="inline-flex items-center gap-1 rounded bg-rose-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-rose-700 disabled:opacity-50"
+                            disabled={busyKey === withdrawal._id || (withdrawalForms[withdrawal._id]?.rejectionReason || '').trim().length < 10}
+                            onClick={() => submitWithdrawalStatus(withdrawal, 'Rejected')}
+                            type="button"
+                          >
+                            <XCircle aria-hidden="true" size={13} /> Reject with reason
+                          </button>
+                        </>
                       )}
-                      <button
-                        className="inline-flex items-center gap-1 rounded bg-rose-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-rose-700 disabled:opacity-50"
-                        disabled={busyKey === withdrawal._id}
-                        onClick={() => runAction(withdrawal._id, () => API.put(`/admin/withdrawals/${withdrawal._id}/status`, { status: 'Rejected' }), 'Payout rejected and reserved funds returned.')}
-                        type="button"
-                      >
-                        <XCircle aria-hidden="true" size={13} /> Reject
-                      </button>
                     </td>
                   </tr>
+                  <tr className="border-b border-slate-100 bg-slate-50/60" key={`${withdrawal._id}-details`}>
+                    <td className="px-4 pb-4 pt-0" colSpan={5}>
+                      <details>
+                        <summary className="w-fit cursor-pointer text-xs font-semibold text-institute-forest">Full payout details &amp; status timeline</summary>
+                        <div className="mt-3 grid gap-4 rounded-lg border border-slate-200 bg-white p-4 text-xs text-slate-600 sm:grid-cols-2">
+                          <div><p className="font-semibold text-slate-800">Payout destination</p><p className="mt-1">Account holder: {withdrawal.payoutSnapshot?.accountHolder || '—'}</p><p>Bank: {withdrawal.payoutSnapshot?.bankName || '—'}</p><p>Account number: {withdrawal.payoutSnapshot?.accountNumber || '—'}</p><p>Branch code: {withdrawal.payoutSnapshot?.branchCode || '—'}</p></div>
+                          <div><p className="font-semibold text-slate-800">Request timeline</p><ol className="mt-1 space-y-1">{(withdrawal.statusEvents || []).map((event, index) => <li key={`${event.status}-${event.createdAt}-${index}`}><strong>{event.status}</strong> · {new Date(event.createdAt).toLocaleString('en-ZA')}{event.actor?.name ? ` · ${event.actor.name}` : ''}{event.amount != null ? ` · deposited R${Number(event.amount).toFixed(2)}` : ''}{event.note ? ` · ${event.note}` : ''}</li>)}</ol><p className="mt-2">Approved: {withdrawal.approvedAt ? new Date(withdrawal.approvedAt).toLocaleString('en-ZA') : 'Not yet'}</p><p>Paid: {withdrawal.paidAt ? new Date(withdrawal.paidAt).toLocaleString('en-ZA') : 'Not yet'}</p><p>Cleared: {withdrawal.clearedAt ? new Date(withdrawal.clearedAt).toLocaleString('en-ZA') : 'Not yet'}</p>{withdrawal.actualPaidAmount != null && <p>Actual amount paid: R{Number(withdrawal.actualPaidAmount).toFixed(2)}</p>}{withdrawal.adminNotes && <p className="mt-1">Finance note: {withdrawal.adminNotes}</p>}</div>
+                        </div>
+                      </details>
+                    </td>
+                  </tr>
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -434,7 +490,7 @@ export default function AdminDashboard() {
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <header className="border-b border-slate-200 bg-slate-50 px-6 py-4">
           <h2 className="text-sm font-bold text-slate-800">User Roles &amp; Permissions</h2>
-          <p className="mt-1 text-xs text-slate-500">Consultants capture leads and request payouts; specialists work assigned leads; admins oversee operations.</p>
+          <p className="mt-1 text-xs text-slate-500">Consultants capture leads and request payouts; specialists work assigned leads and can request eligible non-salary payouts; admins oversee operations.</p>
         </header>
         {users.length === 0 ? (
           <p className="p-6 text-sm text-slate-500">No users found.</p>

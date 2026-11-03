@@ -14,6 +14,7 @@ const LedgerEntry = require('../models/LedgerEntry');
 const PaymentInvoice = require('../models/PaymentInvoice');
 const Ticket = require('../models/Ticket');
 const User = require('../models/User');
+const Withdrawal = require('../models/Withdrawal');
 const WorkspaceMessage = require('../models/WorkspaceMessage');
 const { renderInvoiceHtml, renderInvoiceText } = require('../services/paymentInvoiceService');
 
@@ -118,6 +119,17 @@ test('workspace messages validate broadcast announcements and targeted assignmen
     createdBy: userId,
   });
   await assert.doesNotReject(paymentNotice.validate());
+  const withdrawalAlert = new WorkspaceMessage({
+    tenantId,
+    type: 'withdrawal_requested',
+    title: 'New withdrawal request',
+    body: 'Private payout details for a tenant administrator.',
+    withdrawal: new mongoose.Types.ObjectId(),
+    recipientIds: [userId],
+    audience: 'selected_users',
+    createdBy: userId,
+  });
+  await assert.doesNotReject(withdrawalAlert.validate());
 });
 
 test('audit sanitization masks account numbers and secrets recursively', () => {
@@ -340,6 +352,24 @@ test('commission ledger entries require a lead while assigned payment types can 
   await assert.rejects(entry.validate(), /Commission entries must reference a lead/);
 });
 
+test('scheduled salary settlement ledger entries require an invoice reference', async () => {
+  const id = new mongoose.Types.ObjectId();
+  const entry = new LedgerEntry({
+    tenantId: id,
+    consultant: id,
+    paymentInvoice: new mongoose.Types.ObjectId(),
+    actor: id,
+    type: 'income_paid',
+    incentiveType: 'salary',
+    amount: 100,
+    availableBalanceBefore: 100,
+    availableBalanceAfter: 0,
+  });
+  await assert.doesNotReject(entry.validate());
+  entry.paymentInvoice = null;
+  await assert.rejects(entry.validate(), /Income settlement entries must reference an invoice/);
+});
+
 test('employee IDs use the platform employment ID format', () => {
   const tenantId = new mongoose.Types.ObjectId();
   const user = new User({
@@ -376,6 +406,24 @@ test('payment invoice records validate and render safe HTML and text formats', (
     issuedAt: new Date('2026-11-03T10:00:00.000Z'),
     htmlContent: '<html></html>',
     textContent: 'Invoice',
+  });
+
+  test('withdrawal records preserve approval, rejection, deposit, and clearing details', async () => {
+    const tenantId = new mongoose.Types.ObjectId();
+    const userId = new mongoose.Types.ObjectId();
+    const withdrawal = new Withdrawal({
+      tenantId,
+      consultant: userId,
+      amount: 125,
+      actualPaidAmount: 120,
+      status: 'Processed',
+      approvedAt: new Date(),
+      paidAt: new Date(),
+      clearedAt: new Date(),
+      statusEvents: [{ status: 'Pending', actor: userId }, { status: 'Approved', actor: userId }, { status: 'Processed', actor: userId, amount: 120 }],
+    });
+    assert.equal(withdrawal.validateSync(), undefined);
+    assert.equal(withdrawal.statusEvents[2].amount, 120);
   });
   assert.equal(invoice.validateSync(), undefined);
   const details = {

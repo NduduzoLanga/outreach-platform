@@ -20,6 +20,7 @@ const linksByRole = {
     ["Lead Work Queue", "/leads"],
     ["Conferencing", "/conferencing"],
     ["Earnings", "/earnings"],
+    ["Withdrawals", "/withdrawals"],
     ["Messages", "/messages"],
     ["Support", "/support"],
     ["Profile", "/profile"],

@@ -44,6 +44,7 @@ async function listInvoices(req, baseFilter) {
   }
   const records = await PaymentInvoice.find(filter)
     .select('-htmlContent -textContent')
+    .populate('settlementEvents.actor', 'name email')
     .sort({ issuedAt: -1, _id: -1 })
     .limit(parsedLimit + 1);
   const hasMore = records.length > parsedLimit;
@@ -67,7 +68,8 @@ const getMyInvoices = async (req, res) => {
 const getMyInvoice = async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid invoice ID.' });
-    const invoice = await PaymentInvoice.findOne({ _id: req.params.id, recipient: req.user._id });
+    const invoice = await PaymentInvoice.findOne({ _id: req.params.id, recipient: req.user._id })
+      .populate('settlementEvents.actor', 'name email');
     if (!invoice) return res.status(404).json({ message: 'Invoice not found.' });
     return res.json(invoiceView(invoice));
   } catch (error) {
@@ -87,7 +89,8 @@ const getAdminInvoices = async (req, res) => {
 const getAdminInvoice = async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid invoice ID.' });
-    const invoice = await PaymentInvoice.findById(req.params.id);
+    const invoice = await PaymentInvoice.findById(req.params.id)
+      .populate('settlementEvents.actor', 'name email');
     if (!invoice) return res.status(404).json({ message: 'Invoice not found.' });
     return res.json(invoiceView(invoice));
   } catch (error) {

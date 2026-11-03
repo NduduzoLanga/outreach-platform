@@ -38,9 +38,10 @@ const getStatementSummary = async (req, res) => {
         .sort({ createdAt: -1 }),
       Withdrawal.find({ consultant: userId, createdAt: periodFilter }).sort({ createdAt: -1 }),
       LedgerEntry.find({ consultant: userId, createdAt: periodFilter })
-        .select('type amount availableBalanceBefore availableBalanceAfter lead withdrawal createdAt')
+        .select('type amount availableBalanceBefore availableBalanceAfter lead withdrawal paymentInvoice incentiveType assignmentReason createdAt')
         .populate('lead', 'clientName centerName dealPackage')
         .populate('withdrawal', 'status')
+        .populate('paymentInvoice', 'invoiceNumber')
         .sort({ createdAt: -1 }),
       Withdrawal.aggregate([
         { $match: { consultant: userId, createdAt: periodFilter } },
@@ -70,7 +71,7 @@ const getStatementSummary = async (req, res) => {
         additionalIncomeAssigned: additionalIncomeEntries.reduce((sum, entry) => sum + entry.amount, 0),
         totalWithdrawalsRequested: totals.totalRequested,
         totalPaidOut: ledgerTransactions
-          .filter((entry) => entry.type === 'withdrawal_paid')
+          .filter((entry) => ['withdrawal_paid', 'income_paid'].includes(entry.type))
           .reduce((sum, entry) => sum + entry.amount, 0),
       },
       leads,

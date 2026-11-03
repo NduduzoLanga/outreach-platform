@@ -33,6 +33,17 @@ const paymentInvoiceSchema = new mongoose.Schema(
     issuedAt: { type: Date, required: true },
     htmlContent: { type: String, required: true },
     textContent: { type: String, required: true },
+    settlementStatus: { type: String, enum: ['not_applicable', 'pending', 'partially_paid', 'paid'], default: 'not_applicable' },
+    settlementPaidAmount: { type: Number, default: 0, min: 0 },
+    settlementPaidAt: { type: Date, default: null },
+    settlementBalanceBefore: { type: Number, default: null },
+    settlementBalanceAfter: { type: Number, default: null },
+    settlementEvents: [{
+      amount: { type: Number, required: true, min: 0.01 },
+      actor: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+      note: { type: String, default: '', maxlength: 2000 },
+      createdAt: { type: Date, default: Date.now },
+    }],
   },
   { timestamps: true }
 );

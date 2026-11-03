@@ -313,7 +313,7 @@ export default function Statements() {
                       <td className="p-3 capitalize">{entry.type.replaceAll('_', ' ')}</td>
                       <td className="p-3">
                         {entry.lead?.principalName || entry.lead?.clientName
-                          || (entry.withdrawal ? `Withdrawal · ${entry.withdrawal.status}` : 'Account balance adjustment')}
+                          || (entry.withdrawal ? `Withdrawal · ${entry.withdrawal.status}` : entry.paymentInvoice ? `Salary deposit · ${entry.paymentInvoice.invoiceNumber}` : 'Account balance adjustment')}
                       </td>
                       <td className="p-3 font-semibold">{formatCurrency(entry.amount)}</td>
                       <td className="p-3">{formatCurrency(entry.availableBalanceAfter)}</td>
