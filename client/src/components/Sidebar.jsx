@@ -1,12 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { NavLink } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "../context/AuthContext";
+import API from "../services/api";
 
 const linksByRole = {
   consultant: [
     ["Dashboard", "/dashboard"],
     ["My Leads", "/leads"],
     ["Withdrawals", "/withdrawals"],
+    ["Messages", "/messages"],
     ["Support", "/support"],
     ["Statements", "/statements"],
     ["Profile", "/profile"],
@@ -14,11 +18,17 @@ const linksByRole = {
   specialist: [
     ["Dashboard", "/dashboard"],
     ["Lead Work Queue", "/leads"],
+    ["Conferencing", "/conferencing"],
+    ["Earnings", "/earnings"],
+    ["Messages", "/messages"],
     ["Support", "/support"],
     ["Profile", "/profile"],
   ],
   admin: [
     ["Master Admin", "/admin"],
+    ["Payments", "/admin/payments"],
+    ["User Register", "/admin/register"],
+    ["Messages", "/messages"],
     ["Audit Trail", "/admin/audit-logs"],
     ["Profile", "/profile"],
   ],
@@ -26,6 +36,22 @@ const linksByRole = {
 
 export default function Sidebar({ role = "consultant" }) {
   const [collapsed, setCollapsed] = useState(false);
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const messagesQuery = useQuery({
+    queryKey: ["workspace-messages"],
+    queryFn: async () => (await API.get("/messages")).data,
+    refetchInterval: 5000,
+    refetchOnWindowFocus: true,
+  });
+  useEffect(() => {
+    if (messagesQuery.data?.some((message) => message.type === "lead_assignment")) {
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+    }
+  }, [messagesQuery.data, queryClient]);
+  const unreadMessages = (messagesQuery.data || []).filter(
+    (message) => !(message.readBy || []).some((reader) => String(reader) === String(user?._id))
+  ).length;
   const links = linksByRole[role] || linksByRole.consultant;
   return (
     <aside className={`w-full shrink-0 border-b border-institute-forest/15 bg-white p-3 md:border-b-0 md:border-r md:p-4 ${collapsed ? "md:w-20" : "md:w-60"}`}>
@@ -62,7 +88,7 @@ export default function Sidebar({ role = "consultant" }) {
             title={collapsed ? label : undefined}
             to={to}
           >
-            <span aria-hidden={collapsed} className={collapsed ? "md:hidden" : ""}>{label}</span>
+            <span aria-hidden={collapsed} className={`items-center gap-2 ${collapsed ? "md:hidden" : "inline-flex"}`}>{label}{label === "Messages" && unreadMessages > 0 && <span className="rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold leading-none text-rose-700">{unreadMessages > 99 ? "99+" : unreadMessages}</span>}</span>
             {collapsed && <span aria-hidden="true" className="hidden text-center md:block">{label.slice(0, 1)}</span>}
           </NavLink>
         ))}

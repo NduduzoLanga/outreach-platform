@@ -140,7 +140,7 @@ export default function AdminDashboard() {
   return (
     <section className="mx-auto max-w-7xl space-y-8 p-2 sm:p-6">
       <InstitutionalHero
-        description="System oversight, role permissions, lead assignments, payouts, and support."
+        description="System oversight, pipeline performance, role permissions, lead assignments, payouts, and support."
         title="Master Admin Control Panel"
       />
 

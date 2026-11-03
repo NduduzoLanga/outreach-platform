@@ -185,8 +185,8 @@ const createLead = async (req, res) => {
 const getMyLeads = async (req, res) => {
   try {
     const leads = await Lead.find(applyLeadRLS(req))
-      .populate('consultant', 'name email')
-      .populate('assignedSpecialist', 'name email')
+      .populate('consultant', 'name email accountStatus')
+      .populate('assignedSpecialist', 'name email accountStatus')
       .populate('activityTimeline.actor', 'name email')
       .populate('appointments.specialist', 'name email')
       .populate('stageHistory.completedBy', 'name email')
@@ -567,6 +567,7 @@ const updateLead = async (req, res) => {
           consultant.balance = toCurrency(consultant.balance);
           await consultant.save({ session });
           await LedgerEntry.create([{
+            tenantId: req.tenantId,
             consultant: consultant._id,
             lead: lead._id,
             actor: req.user._id,

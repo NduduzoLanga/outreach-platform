@@ -7,14 +7,16 @@ const ledgerEntrySchema = new mongoose.Schema(
     withdrawal: { type: mongoose.Schema.Types.ObjectId, ref: 'Withdrawal', default: null },
     lead: { type: mongoose.Schema.Types.ObjectId, ref: 'Lead', default: null },
     actor: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    type: { type: String, enum: ['withdrawal_reserved', 'withdrawal_approved', 'withdrawal_paid', 'withdrawal_refunded', 'commission_earned'], required: true },
+    type: { type: String, enum: ['withdrawal_reserved', 'withdrawal_approved', 'withdrawal_paid', 'withdrawal_refunded', 'commission_earned', 'income_assigned'], required: true },
     amount: { type: Number, required: true, min: 0.01 },
     availableBalanceBefore: { type: Number, required: true },
     availableBalanceAfter: { type: Number, required: true },
+    assignmentReason: { type: String, default: '', trim: true, maxlength: 2000 },
     payoutSnapshot: {
       bankName: String,
       accountNumber: String,
       accountHolder: String,
+      branchCode: String,
     },
   },
   { timestamps: true }
@@ -29,10 +31,10 @@ ledgerEntrySchema.pre('save', function rejectResave() {
   if (!this.isNew) throw new Error('Ledger entries are append-only.');
 });
 ledgerEntrySchema.pre('validate', function validateEntryReferences() {
-  if (this.type === 'commission_earned' && !this.lead) {
-    this.invalidate('lead', 'Commission entries must reference a lead.');
+  if (['commission_earned', 'income_assigned'].includes(this.type) && !this.lead) {
+    this.invalidate('lead', 'Income entries must reference a lead.');
   }
-  if (this.type !== 'commission_earned' && !this.withdrawal) {
+  if (!['commission_earned', 'income_assigned'].includes(this.type) && !this.withdrawal) {
     this.invalidate('withdrawal', 'Withdrawal entries must reference a withdrawal.');
   }
 });

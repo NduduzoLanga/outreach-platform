@@ -2,6 +2,8 @@ const express = require('express');
 const {
   getAdminStats,
   getUsers,
+  getAdminPayments,
+  assignIncome,
   createUserInvitation,
   resendUserInvitation,
   updateUserStatus,
@@ -16,12 +18,16 @@ const {
 const { protect } = require('../middleware/authMiddleware');
 const { authorize } = require('../middleware/roleMiddleware');
 const { bindTenant } = require('../security/tenantContext');
+const { createAnnouncement } = require('../controllers/messageController');
 
 const router = express.Router();
 
 router.use(protect, bindTenant, authorize('admin'));
 router.get('/stats', getAdminStats);
 router.get('/users', getUsers);
+router.get('/payments', getAdminPayments);
+router.post('/payments/assign-income', assignIncome);
+router.post('/announcements', createAnnouncement);
 router.post('/users/invitations', createUserInvitation);
 router.post('/users/:id/resend-invitation', resendUserInvitation);
 router.patch('/users/:id/status', updateUserStatus);

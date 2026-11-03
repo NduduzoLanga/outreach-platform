@@ -24,12 +24,16 @@ const getStatementSummary = async (req, res) => {
     }
     const periodFilter = { $gte: startDate, $lt: endDate };
     const userId = req.user._id;
-    const [leads, commissionEntries, withdrawals, ledgerTransactions, withdrawalTotals] = await Promise.all([
+    const [leads, commissionEntries, additionalIncomeEntries, withdrawals, ledgerTransactions, withdrawalTotals] = await Promise.all([
       Lead.find({ consultant: userId, createdAt: periodFilter })
         .select('clientName centerName principalName townshipRegion stage pipelineStage estimatedValue dealPackage commissionEarned commissionCreditedAt createdAt')
         .sort({ createdAt: -1 }),
       LedgerEntry.find({ consultant: userId, type: 'commission_earned', createdAt: periodFilter })
         .select('lead amount createdAt')
+        .populate('lead', 'clientName centerName principalName dealPackage')
+        .sort({ createdAt: -1 }),
+      LedgerEntry.find({ consultant: userId, type: 'income_assigned', createdAt: periodFilter })
+        .select('lead amount assignmentReason createdAt')
         .populate('lead', 'clientName centerName principalName dealPackage')
         .sort({ createdAt: -1 }),
       Withdrawal.find({ consultant: userId, createdAt: periodFilter }).sort({ createdAt: -1 }),
@@ -63,6 +67,7 @@ const getStatementSummary = async (req, res) => {
         closedWonCount: commissionEntries.length,
         totalPipelineValue: leads.reduce((sum, lead) => sum + (lead.estimatedValue || 0), 0),
         totalCommissionEarned: commissionEntries.reduce((sum, entry) => sum + entry.amount, 0),
+        additionalIncomeAssigned: additionalIncomeEntries.reduce((sum, entry) => sum + entry.amount, 0),
         totalWithdrawalsRequested: totals.totalRequested,
         totalPaidOut: ledgerTransactions
           .filter((entry) => entry.type === 'withdrawal_paid')
@@ -70,6 +75,7 @@ const getStatementSummary = async (req, res) => {
       },
       leads,
       commissionEntries,
+      additionalIncomeEntries,
       ledgerTransactions,
       recentWithdrawals: withdrawals,
     });

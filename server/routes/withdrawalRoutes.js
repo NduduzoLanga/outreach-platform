@@ -9,6 +9,6 @@ router.use(protect, bindTenant);
 router.route('/')
   .post(authorize('consultant'), requestWithdrawal)
   .get(authorize('consultant', 'admin'), getMyWithdrawals);
-router.get('/ledger', authorize('consultant', 'admin'), getMyLedger);
+router.get('/ledger', authorize('consultant', 'specialist', 'admin'), getMyLedger);
 
 module.exports = router;

@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 const { authorize } = require('../middleware/roleMiddleware');
+const { applyLeadRLS } = require('../middleware/roleMiddleware');
 const { bindTenant, tenantContext } = require('../security/tenantContext');
 const { sanitizeAuditValue } = require('../services/auditService');
 const { isCentAmount, toCurrency, calculateCommission } = require('../services/money');
@@ -11,6 +12,8 @@ const { getDirectMongoUri, getMongoUri, isSrvDnsResolutionFailure } = require('.
 const Lead = require('../models/Lead');
 const LedgerEntry = require('../models/LedgerEntry');
 const Ticket = require('../models/Ticket');
+const User = require('../models/User');
+const WorkspaceMessage = require('../models/WorkspaceMessage');
 
 test('tenant middleware binds only the authenticated account tenant', async () => {
   await new Promise((resolve, reject) => {
@@ -66,6 +69,41 @@ test('role authorization denies unauthorized roles and permits authorized roles'
 
   authorize('admin')({ user: { role: 'admin' } }, res, () => { nextCalled = true; });
   assert.equal(nextCalled, true);
+});
+
+test('specialist lead filters include assigned leads and the available queue', () => {
+  const specialistId = new mongoose.Types.ObjectId();
+  const filter = applyLeadRLS({ user: { role: 'specialist', _id: specialistId } });
+  assert.deepEqual(filter.$and[2].$or, [
+    { assignedSpecialist: specialistId },
+    { assignedSpecialist: null },
+  ]);
+});
+
+test('workspace messages validate broadcast announcements and targeted assignment notices', async () => {
+  const tenantId = new mongoose.Types.ObjectId();
+  const userId = new mongoose.Types.ObjectId();
+  const announcement = new WorkspaceMessage({
+    tenantId,
+    type: 'announcement',
+    title: 'Updated payout schedule',
+    body: 'Please review the new finance processing timeline.',
+    audience: 'all_accounts',
+    createdBy: userId,
+  });
+  await assert.doesNotReject(announcement.validate());
+
+  const assignmentNotice = new WorkspaceMessage({
+    tenantId,
+    type: 'lead_assignment',
+    title: 'A lead has been assigned to you',
+    body: 'This lead is now assigned to you.',
+    lead: new mongoose.Types.ObjectId(),
+    recipientIds: [userId],
+    audience: 'selected_users',
+    createdBy: userId,
+  });
+  await assert.doesNotReject(assignmentNotice.validate());
 });
 
 test('audit sanitization masks account numbers and secrets recursively', () => {
@@ -261,7 +299,7 @@ test('lead stage history requires an execution report', () => {
   assert.ok(lead.validateSync().errors['stageHistory.0.reportSummary']);
 });
 
-test('commission ledger entries reference a lead and allow no withdrawal reference', async () => {
+test('income ledger entries reference a lead and allow no withdrawal reference', async () => {
   const id = new mongoose.Types.ObjectId();
   const entry = new LedgerEntry({
     tenantId: id,
@@ -275,8 +313,25 @@ test('commission ledger entries reference a lead and allow no withdrawal referen
   });
 
   await assert.doesNotReject(entry.validate());
+  entry.type = 'income_assigned';
+  entry.assignmentReason = 'Recognize specialist contribution on the closed deal.';
+  await assert.doesNotReject(entry.validate());
   entry.lead = null;
-  await assert.rejects(entry.validate(), /Commission entries must reference a lead/);
+  await assert.rejects(entry.validate(), /Income entries must reference a lead/);
+});
+
+test('user profile accepts a secure Calendly scheduling link', () => {
+  const tenantId = new mongoose.Types.ObjectId();
+  const user = new User({
+    tenantId,
+    name: 'Conference Specialist',
+    email: 'specialist@example.test',
+    password: 'valid_password_123',
+    calendlyUrl: 'https://calendly.com/conference-specialist',
+  });
+  assert.equal(user.validateSync(), undefined);
+  user.calendlyUrl = 'http://calendly.com/conference-specialist';
+  assert.ok(user.validateSync().errors.calendlyUrl);
 });
 
 test('support sender roles include consultants, specialists, and admins', () => {

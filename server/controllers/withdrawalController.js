@@ -45,8 +45,10 @@ const requestWithdrawal = async (req, res) => {
         bankName: user.bankDetails.bankName,
         accountNumber: user.bankDetails.accountNumber,
         accountHolder: user.bankDetails.accountHolder || user.name,
+        branchCode: user.bankDetails.branchCode || '',
       };
       const [createdWithdrawal] = await Withdrawal.create([{
+        tenantId: req.tenantId,
         consultant: user._id,
         amount,
         payoutSnapshot,
@@ -54,6 +56,7 @@ const requestWithdrawal = async (req, res) => {
       }], { session });
 
       await LedgerEntry.create([{
+        tenantId: req.tenantId,
         consultant: user._id,
         withdrawal: createdWithdrawal._id,
         actor: user._id,
@@ -95,7 +98,7 @@ const getMyWithdrawals = async (req, res) => {
 const getMyLedger = async (req, res) => {
   try {
     const entries = await LedgerEntry.find({ consultant: req.user._id })
-      .populate('lead', 'clientName')
+      .populate('lead', 'clientName centerName dealPackage')
       .sort({ createdAt: -1 })
       .limit(100);
     return res.json(entries);

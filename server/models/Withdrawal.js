@@ -14,6 +14,7 @@ const withdrawalSchema = new mongoose.Schema(
       bankName: String,
       accountNumber: String,
       accountHolder: String,
+      branchCode: String,
     },
     adminNotes: { type: String, default: '', maxlength: 2000 },
     statusEvents: [{

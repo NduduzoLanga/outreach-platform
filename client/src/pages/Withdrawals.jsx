@@ -1,5 +1,5 @@
-import { useContext, useState } from 'react';
-import { AlertCircle, AlertTriangle, ArrowUpRight, Building, CheckCircle, Clock, Wallet } from 'lucide-react';
+import { useContext, useEffect, useState } from 'react';
+import { AlertCircle, AlertTriangle, ArrowUpRight, Building, CheckCircle, CheckCircle2, Clock, Wallet, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -33,6 +33,14 @@ export default function Withdrawals() {
   const queryClient = useQueryClient();
   const { user, setUser } = useContext(AuthContext);
   const [message, setMessage] = useState({ type: '', text: '' });
+  const [confirmedWithdrawal, setConfirmedWithdrawal] = useState(null);
+  const profileQuery = useQuery({
+    queryKey: ['current-profile'],
+    queryFn: async () => (await API.get('/auth/profile')).data,
+  });
+  useEffect(() => {
+    if (profileQuery.data) setUser(profileQuery.data);
+  }, [profileQuery.data, setUser]);
   const historyQuery = useQuery({
     queryKey: ['withdrawals'],
     queryFn: async () => (await API.get('/withdrawals')).data,
@@ -42,22 +50,26 @@ export default function Withdrawals() {
     queryFn: async () => (await API.get('/withdrawals/ledger')).data,
   });
   const withdrawals = historyQuery.data || [];
-  const commissionEntries = (ledgerQuery.data || []).filter((entry) => entry.type === 'commission_earned');
+  const commissionEntries = (ledgerQuery.data || []).filter((entry) => ['commission_earned', 'income_assigned'].includes(entry.type));
   const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm({
     resolver: zodResolver(withdrawalSchema),
     defaultValues: { amount: '' },
   });
   const requestWithdrawal = useMutation({
-    mutationFn: async ({ amount }) => {
-      await API.post('/withdrawals', { amount });
-      return API.get('/auth/profile');
-    },
+    mutationFn: async ({ amount }) => API.post('/withdrawals', { amount }),
     onSuccess: async ({ data }) => {
-      setMessage({ type: 'success', text: 'Withdrawal request submitted successfully!' });
-      setUser(data);
+      setMessage({ type: '', text: '' });
+      setConfirmedWithdrawal(data);
+      const updatedProfile = { ...currentUser, balance: Math.max(0, Number(currentUser?.balance || 0) - Number(data.amount || 0)) };
+      setUser(updatedProfile);
+      queryClient.setQueryData(['current-profile'], updatedProfile);
       reset({ amount: '' });
-      await queryClient.invalidateQueries({ queryKey: ['withdrawals'] });
-      await queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['withdrawals'] }),
+        queryClient.invalidateQueries({ queryKey: ['withdrawal-ledger'] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+        queryClient.invalidateQueries({ queryKey: ['current-profile'] }),
+      ]);
     },
     onError: (error) => {
       setMessage({
@@ -71,8 +83,9 @@ export default function Withdrawals() {
     setMessage({ type: '', text: '' });
     requestWithdrawal.mutate(values);
   });
-  const hasBankDetails = Boolean(user?.bankDetails?.bankName && user?.bankDetails?.accountNumber);
-  const balance = Number(user?.balance || 0);
+  const currentUser = profileQuery.data || user;
+  const hasBankDetails = Boolean(currentUser?.bankDetails?.bankName && currentUser?.bankDetails?.accountNumber);
+  const balance = Number(currentUser?.balance || 0);
 
   return (
     <section className="mx-auto max-w-7xl space-y-6 p-2 sm:p-6">
@@ -100,9 +113,9 @@ export default function Withdrawals() {
               <div className="mt-3 space-y-1">
                 <p className="flex items-center gap-2 text-sm font-semibold text-slate-800">
                   <Building aria-hidden="true" size={16} />
-                  {user.bankDetails.bankName}
+                  {currentUser.bankDetails.bankName}
                 </p>
-                <p className="text-xs text-slate-500">Acc: •••• {user.bankDetails.accountNumber.slice(-4)}</p>
+                <p className="text-xs text-slate-500">Acc: •••• {currentUser.bankDetails.accountNumber.slice(-4)}</p>
               </div>
             ) : (
               <p className="mt-2 flex items-center gap-1 text-xs font-medium text-amber-600">
@@ -147,15 +160,14 @@ export default function Withdrawals() {
       {message.text && (
         <p
           className={`rounded-xl border p-4 text-sm font-medium ${
-            message.type === 'success'
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-              : 'border-rose-200 bg-rose-50 text-rose-800'
+            'border-rose-200 bg-rose-50 text-rose-800'
           }`}
-          role={message.type === 'error' ? 'alert' : 'status'}
+          role="alert"
         >
           {message.text}
         </p>
       )}
+      {profileQuery.error && <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" role="alert">{profileQuery.error.response?.data?.message || 'Your latest profile and balance could not be refreshed. The server will still validate the available balance when you request a payout.'}<button className="ml-3 font-semibold underline" onClick={() => profileQuery.refetch()} type="button">Retry</button></p>}
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 bg-slate-50 px-6 py-4">
@@ -208,7 +220,7 @@ export default function Withdrawals() {
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 bg-slate-50 px-6 py-4">
           <h2 className="text-sm font-bold text-slate-800">Commission Earnings</h2>
-          <p className="mt-1 text-xs text-slate-500">Commissions are credited to your available balance when a lead is marked Closed Won.</p>
+          <p className="mt-1 text-xs text-slate-500">Automatic package commissions post when a deal reaches Closed Won. Admin-assigned bonuses appear as separate credits.</p>
         </div>
         {ledgerQuery.error ? (
           <div className="p-6 text-sm text-rose-700" role="alert">
@@ -234,7 +246,7 @@ export default function Withdrawals() {
                 {commissionEntries.map((entry) => (
                   <tr key={entry._id}>
                     <td className="p-4 text-slate-600">{new Date(entry.createdAt).toLocaleDateString('en-ZA')}</td>
-                    <td className="p-4 font-medium text-slate-800">{entry.lead?.clientName || `Lead ${String(entry.lead?._id || entry.lead || '').slice(-8)}`}</td>
+                    <td className="p-4 font-medium text-slate-800">{entry.lead?.clientName || `Lead ${String(entry.lead?._id || entry.lead || '').slice(-8)}`}<span className="mt-1 block text-xs font-normal text-slate-500">{entry.type === 'income_assigned' ? `Admin-assigned bonus${entry.assignmentReason ? ` · ${entry.assignmentReason}` : ''}` : 'Automatic deal commission'}</span></td>
                     <td className="p-4 font-semibold text-emerald-700">R{Number(entry.amount).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</td>
                     <td className="p-4 text-slate-600">R{Number(entry.availableBalanceAfter).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</td>
                   </tr>
@@ -244,6 +256,29 @@ export default function Withdrawals() {
           </div>
         )}
       </div>
+      {confirmedWithdrawal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" onClick={() => setConfirmedWithdrawal(null)}>
+          <section
+            aria-labelledby="withdrawal-confirmation-title"
+            aria-modal="true"
+            className="relative w-full max-w-lg rounded-2xl bg-white p-7 text-center shadow-2xl sm:p-9"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <button aria-label="Close confirmation" className="absolute right-4 top-4 rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700" onClick={() => setConfirmedWithdrawal(null)} type="button"><X size={18} /></button>
+            <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-full bg-emerald-100 ring-8 ring-emerald-50">
+              <CheckCircle2 aria-hidden="true" className="text-emerald-600" size={64} strokeWidth={2.2} />
+            </div>
+            <h2 className="mt-6 text-2xl font-bold text-slate-900" id="withdrawal-confirmation-title">Request received</h2>
+            <p className="mt-3 text-base leading-7 text-slate-700">Your withdrawal request for <strong>R{Number(confirmedWithdrawal.amount).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</strong> has been received and will be reviewed by our finance team for processing.</p>
+            <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+              <p className="font-semibold">Processing takes anywhere between 7–14 days.</p>
+              <p className="mt-1 text-xs">You can follow the request status in your payout history.</p>
+            </div>
+            <button className="mt-6 w-full rounded-lg bg-institute-forest px-5 py-3 text-sm font-semibold text-white hover:bg-institute-deep sm:w-auto sm:min-w-40" onClick={() => setConfirmedWithdrawal(null)} type="button">Continue</button>
+          </section>
+        </div>
+      )}
     </section>
   );
 }

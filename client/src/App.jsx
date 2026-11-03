@@ -10,11 +10,16 @@ const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
 const AuditLogs = lazy(() => import("./pages/AuditLogs"));
 const AcceptInvitation = lazy(() => import("./pages/AcceptInvitation"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
+const AdminPayments = lazy(() => import("./pages/AdminPayments"));
+const AdminRegister = lazy(() => import("./pages/AdminRegister"));
+const Conferencing = lazy(() => import("./pages/Conferencing"));
 const Leads = lazy(() => import("./pages/Leads"));
 const Login = lazy(() => import("./pages/Login"));
+const Messages = lazy(() => import("./pages/Messages"));
 const Profile = lazy(() => import("./pages/Profile"));
 const Register = lazy(() => import("./pages/Register"));
 const Statements = lazy(() => import("./pages/Statements"));
+const SpecialistEarnings = lazy(() => import("./pages/SpecialistEarnings"));
 const Support = lazy(() => import("./pages/Support"));
 const Withdrawals = lazy(() => import("./pages/Withdrawals"));
 
@@ -62,13 +67,20 @@ function Workspace() {
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/leads" element={<Leads />} />
                 <Route path="/support" element={<Support />} />
+                <Route path="/messages" element={<Messages />} />
                 <Route path="/profile" element={<Profile />} />
+                <Route element={<RoleRoute roles={["specialist"]} />}>
+                  <Route path="/conferencing" element={<Conferencing />} />
+                  <Route path="/earnings" element={<SpecialistEarnings />} />
+                </Route>
                 <Route element={<RoleRoute roles={["consultant"]} />}>
                   <Route path="/withdrawals" element={<Withdrawals />} />
                   <Route path="/statements" element={<Statements />} />
                 </Route>
                 <Route element={<RoleRoute roles={["admin"]} />}>
                   <Route path="/admin" element={<AdminDashboard />} />
+                  <Route path="/admin/payments" element={<AdminPayments />} />
+                  <Route path="/admin/register" element={<AdminRegister />} />
                   <Route path="/admin/audit-logs" element={<AuditLogs />} />
                 </Route>
               </Route>

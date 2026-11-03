@@ -37,7 +37,10 @@ Keep `server/.env` untracked. The committed `server/.env.example` contains place
 
 - **Consultant:** captures leads, can edit/delete unassigned leads, requests payouts, and views own statements/support tickets.
 - **Specialist:** claims unassigned leads and manages assigned pipeline stages, stage reports, scheduled meetings, and negotiation activity. Specialists see only their assigned leads and the unassigned queue, with separate filters for assigned, available, and combined work.
-- **Admin:** manages roles and assignments, processes payout transitions, handles support tickets, and views tenant-wide metrics and audit activity.
+- **Admin:** manages roles and assignments, processes payout transitions, handles support tickets, and views tenant-wide metrics and audit activity. Separate Payments and User Register workspaces provide the transaction ledger and complete people directory.
+- **Messages:** every account can read workspace announcements and account-specific notices; administrators can publish announcements to the full tenant.
+
+Administrators can broadcast announcements from Messages. Announcements are saved once for the tenant and appear for all current and future tenant accounts; signed-in workspaces check for new messages every five seconds. Specialist assignment changes also create targeted inbox notices for the incoming and outgoing specialists, and the lead queue refreshes when those notices arrive.
 
 ### Lead execution and commissions
 
@@ -47,9 +50,13 @@ The specialist pipeline has five ordered stages: `1_new_unclaimed`, `2_specialis
 
 Specialists can record call, email, note, and meeting touchpoints, optional future follow-ups, and appointments with types and statuses. Appointments can be completed, cancelled, or rescheduled; synced Google events are updated or cancelled as well, while local-only appointments remain local. Appointment creation, timeline activity, and stage advancement are persisted with audit records. With Google OAuth configured, the server can create a generic Calendar event with a Meet conference; it does not invite attendees or send lead contact details to Google. Without a refresh token, the meeting is recorded locally and no fake Meet URL is generated. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, and optionally `GOOGLE_CALENDAR_ID` in `server/.env` to enable live sync.
 
+The specialist Conferencing workspace brings assigned-lead appointments together, supports scheduling and meeting status updates, and links to the specialist's optional HTTPS Calendly booking page from Profile. Google Meet creation uses the same server-side Calendar integration described above; Calendly is opened as an external scheduling service and is not API-synced.
+
 The persistence layer remains MongoDB/Mongoose as used by this application; the supplied PostgreSQL/Supabase DDL is represented by tenant-scoped Mongoose schemas, queries, and middleware rather than introducing a second database stack. Lead interaction and appointment records are embedded in their tenant-scoped lead document so reads and writes share the lead's tenant boundary.
 
 When a specialist closes a lead, they must select the purchased package and provide the required progress report. The originating consultant is credited a once-off fixed commission: Essential Starter R500, Growth Professional R750, Complete Academy R1,000, or Institutional Flagship R1,500–R3,000 (the agreed amount is recorded at closure). The package and commission are stored on the referral; the lead update, balance credit, append-only ledger entry, and audit record run in one MongoDB transaction. Commissioned deals cannot have their stage or estimated value changed through the current API. Admin statistics include package-level deal and commission totals. Existing Closed Won leads are not automatically assigned a package or back-credited.
+
+Admin Payments shows ledger credits and payout transitions with recipient, lead, balance snapshots, payout status history, and masked bank-account details. A Master Admin may assign a separately documented bonus to the consultant who owns a closed-won lead or its currently assigned specialist. Such a bonus is additive and does not change the automatic package commission. Specialists can review assigned income credits in their Earnings workspace; the consultant package-credit rule remains active.
 
 Admin specialist assignments require a reason and retain transfer history. Support messages record the actual sender identity and role; old messages remain readable under their legacy sender labels.
 

@@ -5,11 +5,12 @@ const Lead = require('../models/Lead');
 const Withdrawal = require('../models/Withdrawal');
 const Ticket = require('../models/Ticket');
 const LedgerEntry = require('../models/LedgerEntry');
+const WorkspaceMessage = require('../models/WorkspaceMessage');
 const AuditLog = require('../models/AuditLog');
 const Agency = require('../models/Agency');
 const { writeAuditLog } = require('../services/auditService');
 const { runInTransaction } = require('../services/transactionService');
-const { toCurrency } = require('../services/money');
+const { toCurrency, isCentAmount } = require('../services/money');
 const { COMMISSION_PACKAGES } = require('../services/commissionPackages');
 const { createInvitationToken, getInvitationUrl, sendInvitationEmail } = require('../services/invitationService');
 const { respondWithControllerError } = require('../middleware/controllerError');
@@ -24,6 +25,7 @@ const getAdminStats = async (req, res) => {
       totalLeads,
       closedWonLeads,
       commissionTotals,
+      assignedIncomeTotals,
       packageCommissionTotals,
       pendingWithdrawals,
       openTickets,
@@ -34,6 +36,10 @@ const getAdminStats = async (req, res) => {
       Lead.countDocuments(),
       Lead.countDocuments({ stage: 'Closed Won' }),
       Lead.aggregate([{ $group: { _id: null, total: { $sum: '$commissionEarned' } } }]),
+      LedgerEntry.aggregate([
+        { $match: { type: 'income_assigned' } },
+        { $group: { _id: null, total: { $sum: '$amount' } } },
+      ]),
       Lead.aggregate([
         { $match: { dealPackage: { $in: Object.keys(COMMISSION_PACKAGES) } } },
         { $group: { _id: '$dealPackage', deals: { $sum: 1 }, commission: { $sum: '$commissionEarned' } } },
@@ -48,6 +54,7 @@ const getAdminStats = async (req, res) => {
       leads: { total: totalLeads, closedWon: closedWonLeads },
       finance: {
         commissionEarned: toCurrency(commissionTotals[0]?.total || 0),
+        assignedIncome: toCurrency(assignedIncomeTotals[0]?.total || 0),
         packageBreakdown: packageCommissionTotals.map((entry) => ({
           package: entry._id,
           deals: entry.deals,
@@ -65,18 +72,177 @@ const getAdminStats = async (req, res) => {
 
 const getUsers = async (req, res) => {
   try {
-    const users = await User.find()
-      .select('name firstName lastName email role accountStatus invitedAt invitedBy passwordChangedAt createdAt')
-      .populate('invitedBy', 'name email')
-      .sort({ createdAt: -1 });
+    const [users, consultantLeadCounts, specialistLeadCounts] = await Promise.all([
+      User.find()
+        .select('name firstName lastName email phone role accountStatus invitedAt invitedBy passwordChangedAt createdAt updatedAt')
+        .populate('invitedBy', 'name email')
+        .sort({ createdAt: -1 }),
+      Lead.aggregate([{ $group: { _id: '$consultant', count: { $sum: 1 } } }]),
+      Lead.aggregate([
+        { $match: { assignedSpecialist: { $ne: null } } },
+        { $group: { _id: '$assignedSpecialist', count: { $sum: 1 } } },
+      ]),
+    ]);
+    const consultantLeadCountByUser = new Map(consultantLeadCounts.map((entry) => [String(entry._id), entry.count]));
+    const specialistLeadCountByUser = new Map(specialistLeadCounts.map((entry) => [String(entry._id), entry.count]));
     return res.json(users.map((user) => {
       const legacyName = splitFullName(user.name);
       return {
         ...user.toObject(),
         firstName: user.firstName || legacyName.firstName,
         lastName: user.lastName || legacyName.lastName,
+        consultantLeadCount: consultantLeadCountByUser.get(String(user._id)) || 0,
+        assignedLeadCount: specialistLeadCountByUser.get(String(user._id)) || 0,
+        setupComplete: Boolean(user.passwordChangedAt),
       };
     }));
+  } catch (error) {
+    return respondWithControllerError(req, res, error);
+  }
+};
+
+const getAdminPayments = async (req, res) => {
+  try {
+    const parsedLimit = Number(req.query.limit ?? 100);
+    if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 200) {
+      return res.status(400).json({ message: 'Payment history page size must be between 1 and 200.' });
+    }
+
+    let filter = {};
+    if (req.query.cursor) {
+      if (typeof req.query.cursor !== 'string' || req.query.cursor.length > 512) {
+        return res.status(400).json({ message: 'Invalid payment history cursor.' });
+      }
+      let cursor;
+      try {
+        cursor = JSON.parse(Buffer.from(req.query.cursor, 'base64url').toString('utf8'));
+      } catch {
+        return res.status(400).json({ message: 'Invalid payment history cursor.' });
+      }
+      if (
+        !cursor
+        || !mongoose.isValidObjectId(cursor.id)
+        || typeof cursor.createdAt !== 'string'
+        || Number.isNaN(Date.parse(cursor.createdAt))
+      ) {
+        return res.status(400).json({ message: 'Invalid payment history cursor.' });
+      }
+      const createdAt = new Date(cursor.createdAt);
+      filter = {
+        $or: [
+          { createdAt: { $lt: createdAt } },
+          { createdAt, _id: { $lt: cursor.id } },
+        ],
+      };
+    }
+
+    const records = await LedgerEntry.find(filter)
+      .select('consultant withdrawal lead actor type amount availableBalanceBefore availableBalanceAfter payoutSnapshot assignmentReason createdAt')
+      .populate('consultant', 'name email role')
+      .populate('lead', 'clientName centerName dealPackage stage commissionEarned commissionCreditedAt')
+      .populate({
+        path: 'withdrawal',
+        select: 'amount status payoutSnapshot adminNotes processedAt statusEvents createdAt',
+        populate: { path: 'statusEvents.actor', select: 'name email role' },
+      })
+      .populate('actor', 'name email role')
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(parsedLimit + 1);
+    const hasMore = records.length > parsedLimit;
+    const payments = hasMore ? records.slice(0, parsedLimit) : records;
+    const lastPayment = payments[payments.length - 1];
+    const nextCursor = hasMore && lastPayment
+      ? Buffer.from(JSON.stringify({ createdAt: lastPayment.createdAt.toISOString(), id: lastPayment._id.toString() })).toString('base64url')
+      : null;
+    return res.json({ payments, nextCursor });
+  } catch (error) {
+    return respondWithControllerError(req, res, error);
+  }
+};
+
+const assignIncome = async (req, res) => {
+  try {
+    const { leadId, recipientId, amount, reason } = req.body;
+    const numericAmount = Number(amount);
+    if (!mongoose.isValidObjectId(leadId) || !mongoose.isValidObjectId(recipientId)) {
+      return res.status(400).json({ message: 'Choose a valid closed-won lead and registered recipient.' });
+    }
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0 || !isCentAmount(numericAmount)) {
+      return res.status(400).json({ message: 'Enter a valid bonus amount in cents.' });
+    }
+    if (typeof reason !== 'string' || reason.trim().length < 10 || reason.length > 2000) {
+      return res.status(400).json({ message: 'Provide a reason of at least 10 characters and no more than 2,000.' });
+    }
+    const bonusAmount = toCurrency(numericAmount);
+
+    const result = await runInTransaction(async (session) => {
+      const lead = await Lead.findById(leadId).session(session);
+      if (!lead || lead.stage !== 'Closed Won' || !lead.commissionCreditedAt) {
+        const error = new Error('Income bonuses can only be assigned to an already credited, closed-won deal.');
+        error.statusCode = 409;
+        throw error;
+      }
+
+      const isLeadConsultant = String(lead.consultant) === String(recipientId);
+      const isAssignedSpecialist = String(lead.assignedSpecialist || '') === String(recipientId);
+      if (!isLeadConsultant && !isAssignedSpecialist) {
+        const error = new Error('Choose the consultant who owns this lead or its currently assigned lead specialist.');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const recipientRole = isLeadConsultant ? 'consultant' : 'specialist';
+      const recipient = await User.findOneAndUpdate(
+        { _id: recipientId, role: recipientRole, accountStatus: 'active' },
+        { $inc: { balance: bonusAmount } },
+        { new: true, session }
+      );
+      if (!recipient) {
+        const error = new Error('The selected recipient is no longer an active account with the required role.');
+        error.statusCode = 409;
+        throw error;
+      }
+      const balanceAfter = toCurrency(recipient.balance);
+      const balanceBefore = toCurrency(balanceAfter - bonusAmount);
+      recipient.balance = balanceAfter;
+      await recipient.save({ session });
+
+      const [entry] = await LedgerEntry.create([{
+        tenantId: req.tenantId,
+        consultant: recipient._id,
+        lead: lead._id,
+        actor: req.user._id,
+        type: 'income_assigned',
+        amount: bonusAmount,
+        availableBalanceBefore: balanceBefore,
+        availableBalanceAfter: balanceAfter,
+        assignmentReason: reason.trim(),
+      }], { session });
+      await writeAuditLog({
+        req,
+        action: 'income.bonus_assigned',
+        resourceType: 'LedgerEntry',
+        resourceId: entry._id,
+        before: { recipientBalance: balanceBefore },
+        after: {
+          recipient: recipient._id,
+          recipientRole,
+          lead: lead._id,
+          amount: bonusAmount,
+          reason: reason.trim(),
+          recipientBalance: balanceAfter,
+          automaticCommissionUnchanged: true,
+        },
+        session,
+      });
+      return entry;
+    });
+    await result.populate([
+      { path: 'consultant', select: 'name email role' },
+      { path: 'lead', select: 'clientName centerName dealPackage' },
+      { path: 'actor', select: 'name email role' },
+    ]);
+    return res.status(201).json({ message: 'Additional income bonus assigned and recorded.', payment: result });
   } catch (error) {
     return respondWithControllerError(req, res, error);
   }
@@ -495,6 +661,7 @@ const processWithdrawal = async (req, res) => {
           ? 'withdrawal_paid'
           : 'withdrawal_refunded';
       await LedgerEntry.create([{
+        tenantId: req.tenantId,
         consultant: consultant._id,
         withdrawal: withdrawal._id,
         actor: req.user._id,
@@ -572,6 +739,36 @@ const assignLeadSpecialist = async (req, res) => {
         reason: reason.trim(),
       });
       await currentLead.save({ session });
+      const affectedSpecialistIds = [...new Set(
+        [previousSpecialist, specialistId]
+          .filter(Boolean)
+          .map((id) => String(id))
+      )];
+      if (affectedSpecialistIds.length) {
+        const affectedSpecialists = await User.find({ _id: { $in: affectedSpecialistIds } })
+          .select('_id name')
+          .session(session);
+        const specialistNames = new Map(affectedSpecialists.map((specialist) => [String(specialist._id), specialist.name]));
+        const leadName = currentLead.centerName || currentLead.clientName;
+        const assignmentMessages = affectedSpecialistIds.map((recipientId) => {
+          const isNewAssignee = recipientId === String(specialistId || '');
+          const previousName = previousSpecialist ? specialistNames.get(String(previousSpecialist)) || 'another specialist' : 'the unassigned queue';
+          const nextName = specialistId ? specialistNames.get(String(specialistId)) || 'another specialist' : 'the unassigned queue';
+          return {
+            tenantId: req.tenantId,
+            type: 'lead_assignment',
+            title: isNewAssignee ? 'A lead has been assigned to you' : 'A lead assignment has changed',
+            body: isNewAssignee
+              ? `${leadName} is now assigned to you${previousSpecialist ? ` from ${previousName}` : ''}. Assignment reason: ${reason.trim()}`
+              : `${leadName} was moved from your queue to ${nextName}. Assignment reason: ${reason.trim()}`,
+            lead: currentLead._id,
+            recipientIds: [recipientId],
+            audience: 'selected_users',
+            createdBy: req.user._id,
+          };
+        });
+        await WorkspaceMessage.create(assignmentMessages, { session });
+      }
       await writeAuditLog({
         req,
         action: 'lead.specialist_assigned',
@@ -687,6 +884,8 @@ const replyToTicket = async (req, res) => {
 module.exports = {
   getAdminStats,
   getUsers,
+  getAdminPayments,
+  assignIncome,
   createUserInvitation,
   resendUserInvitation,
   updateUserStatus,

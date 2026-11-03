@@ -38,6 +38,7 @@ export default function Statements() {
       ['Closed won', summary.metrics?.closedWonCount ?? 0],
       ['Estimated value of leads captured', formatCurrency(summary.metrics?.totalPipelineValue)],
       ['Commission earned', formatCurrency(summary.metrics?.totalCommissionEarned)],
+      ['Additional income bonuses', formatCurrency(summary.metrics?.additionalIncomeAssigned)],
       ['Total withdrawals requested', formatCurrency(summary.metrics?.totalWithdrawalsRequested)],
       ['Total paid out', formatCurrency(summary.metrics?.totalPaidOut)],
       ['Current balance', formatCurrency(summary.consultant?.currentBalance)],
@@ -59,6 +60,14 @@ export default function Statements() {
         new Date(entry.createdAt).toLocaleDateString('en-ZA'),
         entry.lead?.principalName || entry.lead?.clientName || 'Lead record unavailable',
         formatPackage(entry.lead?.dealPackage),
+        formatCurrency(entry.amount),
+      ]),
+      [],
+      ['Bonus date', 'Referral', 'Reason', 'Amount'],
+      ...(summary.additionalIncomeEntries || []).map((entry) => [
+        new Date(entry.createdAt).toLocaleDateString('en-ZA'),
+        entry.lead?.principalName || entry.lead?.clientName || 'Lead record unavailable',
+        entry.assignmentReason || '',
         formatCurrency(entry.amount),
       ]),
       [],
@@ -165,7 +174,7 @@ export default function Statements() {
           </div>
         </section>
 
-        <section aria-label="Account metrics" className="grid grid-cols-2 gap-4 text-center md:grid-cols-4">
+        <section aria-label="Account metrics" className="grid grid-cols-2 gap-4 text-center md:grid-cols-3 xl:grid-cols-6">
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
             <span className="text-xs font-semibold uppercase text-slate-500">Total Leads Logged</span>
             <p className="mt-1 text-2xl font-bold text-slate-800">{summary?.metrics?.totalLeads ?? 0}</p>
@@ -181,6 +190,10 @@ export default function Statements() {
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
             <span className="text-xs font-semibold uppercase text-slate-500">Commission Earned</span>
             <p className="mt-1 text-xl font-bold text-blue-700">{formatCurrency(summary?.metrics?.totalCommissionEarned)}</p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <span className="text-xs font-semibold uppercase text-slate-500">Additional Bonuses</span>
+            <p className="mt-1 text-xl font-bold text-emerald-700">{formatCurrency(summary?.metrics?.additionalIncomeAssigned)}</p>
           </div>
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
             <span className="text-xs font-semibold uppercase text-slate-500">Total Paid Out</span>
@@ -228,19 +241,20 @@ export default function Statements() {
         </section>
 
         <section>
-          <h3 className="mb-3 text-sm font-bold text-slate-800">Commission Transactions</h3>
-          {summary?.commissionEntries?.length ? (
+          <h3 className="mb-3 text-sm font-bold text-slate-800">Income Credits</h3>
+          {(summary?.commissionEntries?.length || summary?.additionalIncomeEntries?.length) ? (
             <div className="overflow-x-auto rounded-lg border border-slate-200">
               <table className="w-full text-left text-xs">
                 <thead className="border-b border-slate-200 bg-slate-100 text-slate-600">
-                  <tr><th className="p-3">Date credited</th><th className="p-3">Referral</th><th className="p-3">Package</th><th className="p-3">Amount</th></tr>
+                  <tr><th className="p-3">Date credited</th><th className="p-3">Referral</th><th className="p-3">Credit type</th><th className="p-3">Package / reason</th><th className="p-3">Amount</th></tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
-                  {summary.commissionEntries.map((entry) => (
+                  {[...(summary.commissionEntries || []).map((entry) => ({ ...entry, creditType: 'Automatic commission' })), ...(summary.additionalIncomeEntries || []).map((entry) => ({ ...entry, creditType: 'Additional bonus' }))].sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt)).map((entry) => (
                     <tr key={entry._id}>
                       <td className="p-3">{new Date(entry.createdAt).toLocaleDateString('en-ZA')}</td>
                       <td className="p-3">{entry.lead?.principalName || entry.lead?.clientName || 'Lead record unavailable'}</td>
-                      <td className="p-3">{formatPackage(entry.lead?.dealPackage)}</td>
+                      <td className="p-3">{entry.creditType}</td>
+                      <td className="p-3">{entry.assignmentReason || formatPackage(entry.lead?.dealPackage)}</td>
                       <td className="p-3 font-semibold">{formatCurrency(entry.amount)}</td>
                     </tr>
                   ))}
@@ -249,7 +263,7 @@ export default function Statements() {
             </div>
           ) : (
             <p className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
-              No commissions were credited in this statement month.
+              No income was credited in this statement month.
             </p>
           )}
         </section>

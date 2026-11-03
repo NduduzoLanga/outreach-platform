@@ -33,6 +33,8 @@ const loginUser = async (req, res) => {
         email: user.email,
         role: user.role,
         balance: user.balance,
+        bankDetails: user.bankDetails,
+        calendlyUrl: user.calendlyUrl,
         token: generateToken(user._id),
       });
     } else {
@@ -101,6 +103,8 @@ const acceptInvitation = async (req, res) => {
       email: user.email,
       role: user.role,
       balance: user.balance,
+      bankDetails: user.bankDetails,
+      calendlyUrl: user.calendlyUrl,
       token: generateToken(user._id),
     });
   } catch (error) {
@@ -142,6 +146,7 @@ const updateUserProfile = async (req, res) => {
       const previous = {
         name: currentUser.name,
         phone: currentUser.phone,
+        calendlyUrl: currentUser.calendlyUrl,
         bankDetails: {
           accountHolder: priorBankDetails.accountHolder,
           bankName: priorBankDetails.bankName,
@@ -187,6 +192,18 @@ const updateUserProfile = async (req, res) => {
           throw error;
         }
         currentUser.phone = req.body.phone.trim();
+      }
+      if (req.body.calendlyUrl !== undefined) {
+        if (
+          typeof req.body.calendlyUrl !== 'string'
+          || req.body.calendlyUrl.length > 2048
+          || (req.body.calendlyUrl.trim() && !/^https:\/\/[^\s]+$/i.test(req.body.calendlyUrl.trim()))
+        ) {
+          const error = new Error('Calendly link must be a valid HTTPS URL of at most 2,048 characters.');
+          error.statusCode = 400;
+          throw error;
+        }
+        currentUser.calendlyUrl = req.body.calendlyUrl.trim();
       }
       if (req.body.bankDetails !== undefined) {
         if (!req.body.bankDetails || typeof req.body.bankDetails !== 'object' || Array.isArray(req.body.bankDetails)) {
@@ -244,6 +261,17 @@ const updateUserProfile = async (req, res) => {
           session,
         });
       }
+      if (req.body.calendlyUrl !== undefined && req.body.calendlyUrl.trim() !== previous.calendlyUrl) {
+        await writeAuditLog({
+          req,
+          action: 'user.scheduling_preferences_updated',
+          resourceType: 'User',
+          resourceId: currentUser._id,
+          before: { calendlyUrl: previous.calendlyUrl },
+          after: { calendlyUrl: currentUser.calendlyUrl },
+          session,
+        });
+      }
       if (req.body.password) {
         await writeAuditLog({
           req,
@@ -264,6 +292,7 @@ const updateUserProfile = async (req, res) => {
         lastName: updatedUser.lastName,
         email: updatedUser.email,
         phone: updatedUser.phone,
+        calendlyUrl: updatedUser.calendlyUrl,
         role: updatedUser.role,
         balance: updatedUser.balance,
         bankDetails: updatedUser.bankDetails,

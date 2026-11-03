@@ -160,7 +160,7 @@ export default function Leads() {
   const leadsQuery = useQuery({
     queryKey: ['leads'],
     queryFn: async () => (await API.get('/leads')).data,
-    refetchInterval: 30000,
+    refetchInterval: 10000,
     refetchOnWindowFocus: true,
   });
   const leads = leadsQuery.data || [];

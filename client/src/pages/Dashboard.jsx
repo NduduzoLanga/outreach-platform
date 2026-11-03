@@ -100,6 +100,16 @@ export default function Dashboard() {
           <Link className="rounded-lg border border-institute-forest/25 px-4 py-2 text-sm font-medium text-institute-forest transition hover:border-institute-gold hover:bg-institute-paper focus:outline-none focus:ring-2 focus:ring-institute-gold focus:ring-offset-2" to="/support">
             Contact support
           </Link>
+          {isSpecialist && (
+            <>
+              <Link className="rounded-lg border border-institute-forest/25 px-4 py-2 text-sm font-medium text-institute-forest transition hover:border-institute-gold hover:bg-institute-paper focus:outline-none focus:ring-2 focus:ring-institute-gold focus:ring-offset-2" to="/conferencing">
+                Open conferencing
+              </Link>
+              <Link className="rounded-lg border border-institute-forest/25 px-4 py-2 text-sm font-medium text-institute-forest transition hover:border-institute-gold hover:bg-institute-paper focus:outline-none focus:ring-2 focus:ring-institute-gold focus:ring-offset-2" to="/earnings">
+                Review earnings
+              </Link>
+            </>
+          )}
         </div>
       </section>
     </section>

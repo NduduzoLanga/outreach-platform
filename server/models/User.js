@@ -32,6 +32,7 @@ const userSchema = new mongoose.Schema(
     passwordChangedAt: { type: Date, default: null },
     assignmentVersion: { type: Number, default: 0, select: false },
     phone: { type: String, default: '', trim: true, maxlength: 32, match: /^[+()\d\s.-]*$/ },
+    calendlyUrl: { type: String, default: '', trim: true, maxlength: 2048, match: /^$|^https:\/\/[^\s]+$/i },
     balance: { type: Number, default: 0.0, min: 0 },
     bankDetails: {
       accountHolder: { type: String, default: '', trim: true, maxlength: 120 },

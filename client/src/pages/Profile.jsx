@@ -10,6 +10,14 @@ const profileSchema = z.object({
   firstName: z.string().trim().min(1, 'First name is required.').max(60, 'First name must be 60 characters or fewer.'),
   lastName: z.string().trim().min(1, 'Last name is required.').max(60, 'Last name must be 60 characters or fewer.'),
   phone: z.string().trim().max(32).regex(/^[+()\d\s.-]*$/, 'Use a valid phone number format.'),
+  calendlyUrl: z.string().trim().max(2048).refine((value) => {
+    if (!value) return true;
+    try {
+      return new URL(value).protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }, 'Enter a complete Calendly link beginning with https://.'),
   accountHolder: z.string().trim(),
   bankName: z.string().trim(),
   accountNumber: z.string().trim().max(40).regex(/^[\d\s-]*$/, 'Use digits only for the account number.'),
@@ -24,6 +32,7 @@ export default function Profile() {
     register,
     handleSubmit,
     reset,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(profileSchema),
@@ -31,6 +40,7 @@ export default function Profile() {
       firstName: '',
       lastName: '',
       phone: '',
+      calendlyUrl: '',
       accountHolder: '',
       bankName: '',
       accountNumber: '',
@@ -44,6 +54,7 @@ export default function Profile() {
       firstName: user?.firstName || user?.name?.trim().split(/\s+/)[0] || '',
       lastName: user?.lastName || user?.name?.trim().split(/\s+/).slice(1).join(' ') || '',
       phone: user?.phone || '',
+      calendlyUrl: user?.calendlyUrl || '',
       accountHolder: user?.bankDetails?.accountHolder || '',
       bankName: user?.bankDetails?.bankName || '',
       accountNumber: user?.bankDetails?.accountNumber || '',
@@ -58,6 +69,7 @@ export default function Profile() {
         firstName: form.firstName,
         lastName: form.lastName,
         phone: form.phone,
+        calendlyUrl: form.calendlyUrl,
         bankDetails: {
           accountHolder: form.accountHolder,
           bankName: form.bankName,
@@ -79,12 +91,26 @@ export default function Profile() {
       });
     },
   });
+  const formValues = watch();
+  const isConsultant = user?.role === 'consultant';
+  const roleLabel = user?.role === 'specialist' ? 'Lead specialist' : user?.role === 'admin' ? 'Master administrator' : 'Outreach consultant';
+  const completionFields = [formValues.firstName, formValues.lastName, user?.email, formValues.phone];
+  if (isConsultant) completionFields.push(formValues.bankName, formValues.accountNumber);
+  if (user?.role === 'specialist') completionFields.push(formValues.calendlyUrl);
+  const profileCompletion = Math.round((completionFields.filter(Boolean).length / completionFields.length) * 100);
 
   return (
     <section className="mx-auto max-w-3xl space-y-6 p-2 sm:p-6">
-      <header>
-        <h1 className="text-2xl font-semibold text-slate-800">Profile</h1>
-        <p className="mt-2 text-slate-600">Manage personal information and payout banking details.</p>
+      <header className="rounded-2xl bg-gradient-to-br from-slate-950 via-institute-deep to-institute-forest p-6 text-white shadow-sm sm:p-8">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200">Account settings</p>
+        <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
+          <div><h1 className="text-3xl font-bold tracking-tight">Your profile</h1><p className="mt-2 text-sm text-slate-200">{roleLabel} · {user?.email}</p></div>
+          <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-semibold capitalize">{(user?.accountStatus || 'active').replaceAll('_', ' ')}</span>
+        </div>
+        <div className="mt-5 max-w-md">
+          <div className="flex justify-between text-xs text-slate-200"><span>Profile readiness</span><span>{profileCompletion}%</span></div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/20"><div className="h-full rounded-full bg-institute-gold transition-all" style={{ width: `${profileCompletion}%` }} /></div>
+        </div>
       </header>
 
       {message.text && (
@@ -139,7 +165,25 @@ export default function Profile() {
           </div>
         </fieldset>
 
-        <fieldset className="space-y-4 border-t border-slate-200 pt-5">
+        {(user?.role === 'specialist' || user?.role === 'consultant') && (
+          <fieldset className="space-y-4 border-t border-slate-200 pt-5">
+            <legend className="text-lg font-semibold text-slate-800">Scheduling preferences</legend>
+            <p className="text-sm text-slate-500">Add your Calendly booking page so clients can easily choose a time with you.</p>
+            <label className="block text-sm font-medium text-slate-700">
+              Calendly booking link
+              <input
+                autoComplete="url"
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                maxLength={2048}
+                placeholder="https://calendly.com/your-name"
+                {...register('calendlyUrl')}
+              />
+              {errors.calendlyUrl && <span className="mt-1 block text-xs text-rose-600">{errors.calendlyUrl.message}</span>}
+            </label>
+          </fieldset>
+        )}
+
+        {isConsultant && <fieldset className="space-y-4 border-t border-slate-200 pt-5">
           <legend className="text-lg font-semibold text-slate-800">Payout bank details</legend>
           <p className="text-sm text-slate-500">Required to submit a withdrawal request. Details are snapshotted when you request a payout.</p>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -176,7 +220,7 @@ export default function Profile() {
               />
             </label>
           </div>
-        </fieldset>
+        </fieldset>}
 
         <fieldset className="space-y-3 border-t border-slate-200 pt-5">
           <legend className="text-lg font-semibold text-slate-800">Change password</legend>
