@@ -34,7 +34,7 @@ export default function AdminDashboard() {
   const [error, setError] = useState('');
   const [busyKey, setBusyKey] = useState('');
   const [notice, setNotice] = useState('');
-  const [inviteForm, setInviteForm] = useState({ firstName: '', lastName: '', email: '', phone: '', role: 'consultant' });
+  const [inviteForm, setInviteForm] = useState({ firstName: '', lastName: '', employeeId: '', email: '', phone: '', role: 'consultant' });
   const [inviteResult, setInviteResult] = useState(null);
   const [copiedInvite, setCopiedInvite] = useState(false);
 
@@ -91,7 +91,7 @@ export default function AdminDashboard() {
       const { data } = await API.post('/admin/users/invitations', inviteForm);
       setInviteResult(data);
       setNotice(data.message);
-      setInviteForm({ firstName: '', lastName: '', email: '', phone: '', role: 'consultant' });
+      setInviteForm({ firstName: '', lastName: '', employeeId: '', email: '', phone: '', role: 'consultant' });
       await fetchAdminData();
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'Could not create this account invitation.');
@@ -242,7 +242,7 @@ export default function AdminDashboard() {
           <h2 className="text-sm font-bold text-slate-800">Add a consultant or lead specialist</h2>
           <p className="mt-1 text-xs text-slate-500">The invitee sets their own password using a single-use link that expires in 24 hours. Passwords are never sent by email.</p>
         </header>
-        <form className="grid gap-4 p-5 sm:grid-cols-2 xl:grid-cols-5" onSubmit={createInvitation}>
+        <form className="grid gap-4 p-5 sm:grid-cols-2 xl:grid-cols-6" onSubmit={createInvitation}>
           <label className="block text-xs font-medium text-slate-700">
             First name *
             <input
@@ -263,6 +263,19 @@ export default function AdminDashboard() {
               onChange={(event) => setInviteForm((current) => ({ ...current, lastName: event.target.value }))}
               required
               value={inviteForm.lastName}
+            />
+          </label>
+          <label className="block text-xs font-medium text-slate-700">
+            Employment ID *
+            <input
+              autoComplete="off"
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              maxLength={32}
+              onChange={(event) => setInviteForm((current) => ({ ...current, employeeId: event.target.value.toUpperCase() }))}
+              pattern="#EMP-[A-Z0-9]+-[0-9]{3,}"
+              placeholder="#EMP-VOS-012"
+              required
+              value={inviteForm.employeeId}
             />
           </label>
           <label className="block text-xs font-medium text-slate-700">
@@ -308,7 +321,7 @@ export default function AdminDashboard() {
         {inviteResult && (
           <div className={`mx-5 mb-5 rounded-lg border p-4 ${inviteResult.delivery.sent ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
             <p className="text-sm font-semibold text-slate-800">{inviteResult.message}</p>
-            {inviteResult.user && <p className="mt-1 text-xs text-slate-600">{inviteResult.user.name} · {inviteResult.user.email} · {inviteResult.user.role}</p>}
+            {inviteResult.user && <p className="mt-1 text-xs text-slate-600">{inviteResult.user.name} · {inviteResult.user.employeeId} · {inviteResult.user.email} · {inviteResult.user.role}</p>}
             {inviteResult.invitationUrl && (
               <div className="mt-3 space-y-2">
                 <label className="block text-xs font-semibold text-slate-700" htmlFor="manual-invitation-link">One-time setup link — share only with the intended invitee</label>

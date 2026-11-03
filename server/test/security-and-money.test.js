@@ -11,9 +11,11 @@ const { createGoogleMeetEvent, updateGoogleMeetEvent } = require('../services/go
 const { getDirectMongoUri, getMongoUri, isSrvDnsResolutionFailure } = require('../config/mongoUri');
 const Lead = require('../models/Lead');
 const LedgerEntry = require('../models/LedgerEntry');
+const PaymentInvoice = require('../models/PaymentInvoice');
 const Ticket = require('../models/Ticket');
 const User = require('../models/User');
 const WorkspaceMessage = require('../models/WorkspaceMessage');
+const { renderInvoiceHtml, renderInvoiceText } = require('../services/paymentInvoiceService');
 
 test('tenant middleware binds only the authenticated account tenant', async () => {
   await new Promise((resolve, reject) => {
@@ -104,6 +106,18 @@ test('workspace messages validate broadcast announcements and targeted assignmen
     createdBy: userId,
   });
   await assert.doesNotReject(assignmentNotice.validate());
+
+  const paymentNotice = new WorkspaceMessage({
+    tenantId,
+    type: 'payment_received',
+    title: "You've received a payment",
+    body: 'A new payment credit and invoice are available.',
+    invoice: new mongoose.Types.ObjectId(),
+    recipientIds: [userId],
+    audience: 'selected_users',
+    createdBy: userId,
+  });
+  await assert.doesNotReject(paymentNotice.validate());
 });
 
 test('audit sanitization masks account numbers and secrets recursively', () => {
@@ -299,7 +313,7 @@ test('lead stage history requires an execution report', () => {
   assert.ok(lead.validateSync().errors['stageHistory.0.reportSummary']);
 });
 
-test('income ledger entries reference a lead and allow no withdrawal reference', async () => {
+test('commission ledger entries require a lead while assigned payment types can stand alone', async () => {
   const id = new mongoose.Types.ObjectId();
   const entry = new LedgerEntry({
     tenantId: id,
@@ -315,9 +329,74 @@ test('income ledger entries reference a lead and allow no withdrawal reference',
   await assert.doesNotReject(entry.validate());
   entry.type = 'income_assigned';
   entry.assignmentReason = 'Recognize specialist contribution on the closed deal.';
+  entry.incentiveType = 'referral_additional_incentive';
   await assert.doesNotReject(entry.validate());
   entry.lead = null;
-  await assert.rejects(entry.validate(), /Income entries must reference a lead/);
+  entry.incentiveType = 'salary';
+  await assert.doesNotReject(entry.validate());
+  entry.incentiveType = undefined;
+  await assert.rejects(entry.validate(), /Assigned income must have a payment type/);
+  entry.type = 'commission_earned';
+  await assert.rejects(entry.validate(), /Commission entries must reference a lead/);
+});
+
+test('employee IDs use the platform employment ID format', () => {
+  const tenantId = new mongoose.Types.ObjectId();
+  const user = new User({
+    tenantId,
+    name: 'Employee Example',
+    email: 'employee@example.test',
+    password: 'valid_password_123',
+    employeeId: '#EMP-VOS-012',
+  });
+  assert.equal(user.validateSync(), undefined);
+  user.employeeId = 'EMP-VOS-012';
+  assert.ok(user.validateSync().errors.employeeId);
+});
+
+test('payment invoice records validate and render safe HTML and text formats', () => {
+  const tenantId = new mongoose.Types.ObjectId();
+  const userId = new mongoose.Types.ObjectId();
+  const ledgerId = new mongoose.Types.ObjectId();
+  const invoice = new PaymentInvoice({
+    tenantId,
+    invoiceNumber: 'OP-20261103-1234ABCD',
+    ledgerEntry: ledgerId,
+    recipient: userId,
+    recipientSnapshot: {
+      name: 'Invoice <script>alert(1)</script>',
+      email: 'invoice@example.test',
+      employeeId: '#EMP-VOS-012',
+      role: 'consultant',
+    },
+    paymentType: 'performance_based_incentive',
+    amount: 100,
+    availableBalanceBefore: 50,
+    availableBalanceAfter: 150,
+    issuedAt: new Date('2026-11-03T10:00:00.000Z'),
+    htmlContent: '<html></html>',
+    textContent: 'Invoice',
+  });
+  assert.equal(invoice.validateSync(), undefined);
+  const details = {
+    invoiceNumber: invoice.invoiceNumber,
+    recipientName: invoice.recipientSnapshot.name,
+    employeeId: invoice.recipientSnapshot.employeeId,
+    role: 'Consultant',
+    reference: '<unsafe deal>',
+    paymentType: invoice.paymentType,
+    description: 'Performance achievement',
+    amount: 100,
+    availableBalanceBefore: 50,
+    availableBalanceAfter: 150,
+    issuedAt: invoice.issuedAt,
+  };
+  const html = renderInvoiceHtml(details);
+  assert.match(html, /invoice OP-20261103-1234ABCD/);
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(html, /<script>alert/);
+  assert.match(renderInvoiceText(details), /Amount: R100,00/);
+  assert.match(renderInvoiceText(details), /Payment type: Performance-based incentive/);
 });
 
 test('user profile accepts a secure Calendly scheduling link', () => {

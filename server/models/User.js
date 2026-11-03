@@ -17,6 +17,13 @@ const userSchema = new mongoose.Schema(
       maxlength: 254,
       match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
     },
+    employeeId: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      maxlength: 32,
+      match: /^#EMP-[A-Z0-9]+-\d{3,}$/i,
+    },
     password: { type: String, required: true, minlength: 12, maxlength: 72 },
     role: { type: String, enum: ['consultant', 'specialist', 'admin'], default: 'consultant' },
     accountStatus: {
@@ -46,6 +53,10 @@ const userSchema = new mongoose.Schema(
 
 userSchema.plugin(tenantPlugin);
 userSchema.index({ tenantId: 1, email: 1 }, { unique: true });
+userSchema.index(
+  { tenantId: 1, employeeId: 1 },
+  { unique: true, partialFilterExpression: { employeeId: { $type: 'string' } } }
+);
 
 userSchema.pre('validate', function synchronizeUserName() {
   if (this.isModified('firstName') || this.isModified('lastName')) {

@@ -10,7 +10,8 @@
     "test": "node --test",
     "init-db": "node scripts/initMongoDb.js",
     "bootstrap-admin": "node scripts/bootstrapAdmin.js",
-    "promote-admin": "node scripts/promoteAdmin.js"
+    "promote-admin": "node scripts/promoteAdmin.js",
+    "assign-employee-ids": "node scripts/assignEmployeeIds.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

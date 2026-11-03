@@ -13,9 +13,10 @@ const getMessages = async (req, res) => {
         { recipientIds: req.user._id },
       ],
     })
-      .select('type title body lead recipientIds audience createdBy readBy createdAt')
+      .select('type title body lead invoice recipientIds audience createdBy readBy createdAt')
       .populate('createdBy', 'name role')
       .populate('lead', 'clientName centerName')
+      .populate('invoice', 'invoiceNumber amount paymentType issuedAt')
       .sort({ createdAt: -1, _id: -1 })
       .limit(100);
     return res.json(messages);

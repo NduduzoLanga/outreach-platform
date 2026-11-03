@@ -15,6 +15,10 @@ const { COMMISSION_PACKAGES } = require('../services/commissionPackages');
 const { createInvitationToken, getInvitationUrl, sendInvitationEmail } = require('../services/invitationService');
 const { respondWithControllerError } = require('../middleware/controllerError');
 const { combineName, splitFullName } = require('../services/userName');
+const {
+  createPaymentInvoice,
+  invoiceView,
+} = require('../services/paymentInvoiceService');
 
 const getAdminStats = async (req, res) => {
   try {
@@ -74,7 +78,7 @@ const getUsers = async (req, res) => {
   try {
     const [users, consultantLeadCounts, specialistLeadCounts] = await Promise.all([
       User.find()
-        .select('name firstName lastName email phone role accountStatus invitedAt invitedBy passwordChangedAt createdAt updatedAt')
+        .select('name firstName lastName employeeId email phone role accountStatus invitedAt invitedBy passwordChangedAt createdAt updatedAt')
         .populate('invitedBy', 'name email')
         .sort({ createdAt: -1 }),
       Lead.aggregate([{ $group: { _id: '$consultant', count: { $sum: 1 } } }]),
@@ -137,8 +141,8 @@ const getAdminPayments = async (req, res) => {
     }
 
     const records = await LedgerEntry.find(filter)
-      .select('consultant withdrawal lead actor type amount availableBalanceBefore availableBalanceAfter payoutSnapshot assignmentReason createdAt')
-      .populate('consultant', 'name email role')
+      .select('consultant withdrawal lead actor type incentiveType amount availableBalanceBefore availableBalanceAfter payoutSnapshot assignmentReason createdAt')
+      .populate('consultant', 'name email role employeeId')
       .populate('lead', 'clientName centerName dealPackage stage commissionEarned commissionCreditedAt')
       .populate({
         path: 'withdrawal',
@@ -162,39 +166,51 @@ const getAdminPayments = async (req, res) => {
 
 const assignIncome = async (req, res) => {
   try {
-    const { leadId, recipientId, amount, reason } = req.body;
+    const {
+      leadId,
+      recipientId,
+      paymentType,
+      amount,
+      reason,
+    } = req.body;
     const numericAmount = Number(amount);
-    if (!mongoose.isValidObjectId(leadId) || !mongoose.isValidObjectId(recipientId)) {
-      return res.status(400).json({ message: 'Choose a valid closed-won lead and registered recipient.' });
+    const allowedPaymentTypes = [
+      'referral_additional_incentive',
+      'performance_based_incentive',
+      'gratuity_incentive',
+      'salary',
+    ];
+    if (!allowedPaymentTypes.includes(paymentType)) {
+      return res.status(400).json({ message: 'Choose a valid payment type.' });
+    }
+    if (!mongoose.isValidObjectId(recipientId)) {
+      return res.status(400).json({ message: 'Choose an active consultant or lead specialist.' });
+    }
+    if (leadId !== undefined && leadId !== null && leadId !== '' && !mongoose.isValidObjectId(leadId)) {
+      return res.status(400).json({ message: 'Choose a valid related deal or leave it blank.' });
     }
     if (!Number.isFinite(numericAmount) || numericAmount <= 0 || !isCentAmount(numericAmount)) {
-      return res.status(400).json({ message: 'Enter a valid bonus amount in cents.' });
+      return res.status(400).json({ message: 'Enter a valid payment amount in cents.' });
     }
     if (typeof reason !== 'string' || reason.trim().length < 10 || reason.length > 2000) {
       return res.status(400).json({ message: 'Provide a reason of at least 10 characters and no more than 2,000.' });
     }
-    const bonusAmount = toCurrency(numericAmount);
+    const assignedAmount = toCurrency(numericAmount);
 
     const result = await runInTransaction(async (session) => {
-      const lead = await Lead.findById(leadId).session(session);
-      if (!lead || lead.stage !== 'Closed Won' || !lead.commissionCreditedAt) {
-        const error = new Error('Income bonuses can only be assigned to an already credited, closed-won deal.');
-        error.statusCode = 409;
-        throw error;
+      let lead = null;
+      if (leadId) {
+        lead = await Lead.findById(leadId).session(session);
+        if (!lead || lead.stage !== 'Closed Won') {
+          const error = new Error('A related deal must be a valid closed-won lead.');
+          error.statusCode = 409;
+          throw error;
+        }
       }
 
-      const isLeadConsultant = String(lead.consultant) === String(recipientId);
-      const isAssignedSpecialist = String(lead.assignedSpecialist || '') === String(recipientId);
-      if (!isLeadConsultant && !isAssignedSpecialist) {
-        const error = new Error('Choose the consultant who owns this lead or its currently assigned lead specialist.');
-        error.statusCode = 400;
-        throw error;
-      }
-
-      const recipientRole = isLeadConsultant ? 'consultant' : 'specialist';
       const recipient = await User.findOneAndUpdate(
-        { _id: recipientId, role: recipientRole, accountStatus: 'active' },
-        { $inc: { balance: bonusAmount } },
+        { _id: recipientId, role: { $in: ['consultant', 'specialist'] }, accountStatus: 'active' },
+        { $inc: { balance: assignedAmount } },
         { new: true, session }
       );
       if (!recipient) {
@@ -203,46 +219,63 @@ const assignIncome = async (req, res) => {
         throw error;
       }
       const balanceAfter = toCurrency(recipient.balance);
-      const balanceBefore = toCurrency(balanceAfter - bonusAmount);
+      const balanceBefore = toCurrency(balanceAfter - assignedAmount);
       recipient.balance = balanceAfter;
       await recipient.save({ session });
 
       const [entry] = await LedgerEntry.create([{
         tenantId: req.tenantId,
         consultant: recipient._id,
-        lead: lead._id,
+        ...(lead ? { lead: lead._id } : {}),
         actor: req.user._id,
         type: 'income_assigned',
-        amount: bonusAmount,
+        incentiveType: paymentType,
+        amount: assignedAmount,
         availableBalanceBefore: balanceBefore,
         availableBalanceAfter: balanceAfter,
         assignmentReason: reason.trim(),
       }], { session });
+      const { invoice } = await createPaymentInvoice({
+        req,
+        session,
+        entry,
+        recipient,
+        lead,
+        paymentType,
+        description: reason,
+      });
       await writeAuditLog({
         req,
-        action: 'income.bonus_assigned',
+        action: 'income.payment_assigned',
         resourceType: 'LedgerEntry',
         resourceId: entry._id,
         before: { recipientBalance: balanceBefore },
         after: {
           recipient: recipient._id,
-          recipientRole,
-          lead: lead._id,
-          amount: bonusAmount,
+          recipientRole: recipient.role,
+          employeeId: recipient.employeeId || '',
+          lead: lead?._id || null,
+          paymentType,
+          amount: assignedAmount,
           reason: reason.trim(),
+          invoiceNumber: invoice.invoiceNumber,
           recipientBalance: balanceAfter,
           automaticCommissionUnchanged: true,
         },
         session,
       });
-      return entry;
+      return { entry, invoice };
     });
-    await result.populate([
-      { path: 'consultant', select: 'name email role' },
+    await result.entry.populate([
+      { path: 'consultant', select: 'name email role employeeId' },
       { path: 'lead', select: 'clientName centerName dealPackage' },
       { path: 'actor', select: 'name email role' },
     ]);
-    return res.status(201).json({ message: 'Additional income bonus assigned and recorded.', payment: result });
+    return res.status(201).json({
+      message: 'Payment assigned and recorded. The recipient has an in-platform notification and invoice.',
+      payment: result.entry,
+      invoice: invoiceView(result.invoice),
+    });
   } catch (error) {
     return respondWithControllerError(req, res, error);
   }
@@ -288,6 +321,7 @@ async function deliverInvitation(req, user, token) {
 const createUserInvitation = async (req, res) => {
   try {
     const { email, role, phone = '' } = req.body;
+    const employeeId = typeof req.body.employeeId === 'string' ? req.body.employeeId.trim().toUpperCase() : '';
     const legacyName = typeof req.body.name === 'string' ? splitFullName(req.body.name) : null;
     const firstNameInput = req.body.firstName ?? legacyName?.firstName;
     const lastNameInput = req.body.lastName ?? legacyName?.lastName;
@@ -303,6 +337,9 @@ const createUserInvitation = async (req, res) => {
     if (!['consultant', 'specialist'].includes(role)) {
       return res.status(400).json({ message: 'Choose consultant or specialist. Administrator access is managed separately.' });
     }
+    if (!/^#EMP-[A-Z0-9]+-\d{3,}$/.test(employeeId) || employeeId.length > 32) {
+      return res.status(400).json({ message: 'Enter an employment ID in the format #EMP-VOS-012.' });
+    }
     if (typeof phone !== 'string' || phone.length > 32 || (phone && !/^[+()\d\s.-]+$/.test(phone))) {
       return res.status(400).json({ message: 'Enter a valid phone number of at most 32 characters.' });
     }
@@ -310,6 +347,9 @@ const createUserInvitation = async (req, res) => {
     const normalizedEmail = email.trim().toLowerCase();
     if (await User.findOne({ email: normalizedEmail })) {
       return res.status(409).json({ message: 'An account already exists for this email address.' });
+    }
+    if (await User.findOne({ employeeId })) {
+      return res.status(409).json({ message: 'That employment ID is already assigned to an account.' });
     }
     const invitation = createInvitationToken();
     const initialPassword = randomBytes(32).toString('hex');
@@ -319,6 +359,7 @@ const createUserInvitation = async (req, res) => {
         name,
         firstName,
         lastName,
+        employeeId,
         email: normalizedEmail,
         password: initialPassword,
         role,
@@ -334,7 +375,7 @@ const createUserInvitation = async (req, res) => {
         action: 'user.invitation_created',
         resourceType: 'User',
         resourceId: created._id,
-        after: { email: created.email, role: created.role, accountStatus: created.accountStatus, expiresAt: invitation.expiresAt },
+        after: { email: created.email, employeeId: created.employeeId, role: created.role, accountStatus: created.accountStatus, expiresAt: invitation.expiresAt },
         session,
       });
       return created;
@@ -349,6 +390,7 @@ const createUserInvitation = async (req, res) => {
         name: user.name,
         firstName: user.firstName,
         lastName: user.lastName,
+        employeeId: user.employeeId,
         email: user.email,
         role: user.role,
         accountStatus: user.accountStatus,
@@ -358,6 +400,9 @@ const createUserInvitation = async (req, res) => {
       ...(result.invitationUrl ? { invitationUrl: result.invitationUrl } : {}),
     });
   } catch (error) {
+    if (error?.code === 11000 && error?.keyPattern?.employeeId) {
+      return res.status(409).json({ message: 'That employment ID is already assigned to an account.' });
+    }
     return respondWithControllerError(req, res, error);
   }
 };

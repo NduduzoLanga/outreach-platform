@@ -19,6 +19,7 @@ const { protect } = require('../middleware/authMiddleware');
 const { authorize } = require('../middleware/roleMiddleware');
 const { bindTenant } = require('../security/tenantContext');
 const { createAnnouncement } = require('../controllers/messageController');
+const { getAdminInvoices, getAdminInvoice } = require('../controllers/paymentInvoiceController');
 
 const router = express.Router();
 
@@ -26,6 +27,8 @@ router.use(protect, bindTenant, authorize('admin'));
 router.get('/stats', getAdminStats);
 router.get('/users', getUsers);
 router.get('/payments', getAdminPayments);
+router.get('/payments/invoices', getAdminInvoices);
+router.get('/payments/invoices/:id', getAdminInvoice);
 router.post('/payments/assign-income', assignIncome);
 router.post('/announcements', createAnnouncement);
 router.post('/users/invitations', createUserInvitation);

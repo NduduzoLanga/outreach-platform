@@ -7,6 +7,7 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { AuthContext } from '../context/AuthContext';
 import API from '../services/api';
+import PaymentInvoices from '../components/PaymentInvoices';
 
 const STATUS_STYLES = {
   Pending: 'bg-amber-100 text-amber-800',
@@ -219,8 +220,8 @@ export default function Withdrawals() {
       </div>
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 bg-slate-50 px-6 py-4">
-          <h2 className="text-sm font-bold text-slate-800">Commission Earnings</h2>
-          <p className="mt-1 text-xs text-slate-500">Automatic package commissions post when a deal reaches Closed Won. Admin-assigned bonuses appear as separate credits.</p>
+          <h2 className="text-sm font-bold text-slate-800">Income Credits</h2>
+          <p className="mt-1 text-xs text-slate-500">Automatic package commissions post when a deal reaches Closed Won. Additional assigned payments appear as separate credits.</p>
         </div>
         {ledgerQuery.error ? (
           <div className="p-6 text-sm text-rose-700" role="alert">
@@ -246,7 +247,7 @@ export default function Withdrawals() {
                 {commissionEntries.map((entry) => (
                   <tr key={entry._id}>
                     <td className="p-4 text-slate-600">{new Date(entry.createdAt).toLocaleDateString('en-ZA')}</td>
-                    <td className="p-4 font-medium text-slate-800">{entry.lead?.clientName || `Lead ${String(entry.lead?._id || entry.lead || '').slice(-8)}`}<span className="mt-1 block text-xs font-normal text-slate-500">{entry.type === 'income_assigned' ? `Admin-assigned bonus${entry.assignmentReason ? ` · ${entry.assignmentReason}` : ''}` : 'Automatic deal commission'}</span></td>
+                    <td className="p-4 font-medium text-slate-800">{entry.lead?.clientName || entry.lead?.centerName || (entry.type === 'income_assigned' ? 'General payment' : `Lead ${String(entry.lead?._id || entry.lead || '').slice(-8)}`)}<span className="mt-1 block text-xs font-normal text-slate-500">{entry.type === 'income_assigned' ? `${({ referral_additional_incentive: 'Referral additional incentive', performance_based_incentive: 'Performance-based incentive', gratuity_incentive: 'Gratuity incentive', salary: 'Salary' })[entry.incentiveType] || 'Admin-assigned payment'}${entry.assignmentReason ? ` · ${entry.assignmentReason}` : ''}` : 'Automatic deal commission'}</span></td>
                     <td className="p-4 font-semibold text-emerald-700">R{Number(entry.amount).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</td>
                     <td className="p-4 text-slate-600">R{Number(entry.availableBalanceAfter).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</td>
                   </tr>
@@ -256,6 +257,7 @@ export default function Withdrawals() {
           </div>
         )}
       </div>
+      <PaymentInvoices />
       {confirmedWithdrawal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" onClick={() => setConfirmedWithdrawal(null)}>
           <section

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bell, Check, Megaphone, Send } from 'lucide-react';
+import { BadgeDollarSign, Bell, Check, Megaphone, Send } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import API from '../services/api';
@@ -96,8 +96,8 @@ export default function Messages() {
                 <article className={`p-5 ${unread ? 'bg-emerald-50/40' : 'bg-white'}`} key={message._id}>
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="flex min-w-0 gap-3">
-                      <div className={`mt-0.5 rounded-lg p-2 ${message.type === 'announcement' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}>{message.type === 'announcement' ? <Megaphone size={17} /> : <Bell size={17} />}</div>
-                      <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-slate-900">{message.title}</h3>{unread && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-800">New</span>}</div><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">{message.body}</p><p className="mt-2 text-xs text-slate-500">{message.type === 'announcement' ? 'Platform announcement' : `Lead update${message.lead?.centerName || message.lead?.clientName ? ` · ${message.lead.centerName || message.lead.clientName}` : ''}`} · {message.createdBy?.name || 'Master Admin'} · {new Date(message.createdAt).toLocaleString('en-ZA')}</p></div>
+                      <div className={`mt-0.5 rounded-lg p-2 ${message.type === 'announcement' ? 'bg-amber-100 text-amber-800' : message.type === 'payment_received' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}`}>{message.type === 'announcement' ? <Megaphone size={17} /> : message.type === 'payment_received' ? <BadgeDollarSign size={17} /> : <Bell size={17} />}</div>
+                      <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-slate-900">{message.title}</h3>{unread && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-800">New</span>}</div><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">{message.body}</p><p className="mt-2 text-xs text-slate-500">{message.type === 'announcement' ? 'Platform announcement' : message.type === 'payment_received' ? `Payment invoice${message.invoice?.invoiceNumber ? ` · ${message.invoice.invoiceNumber}` : ''}` : `Lead update${message.lead?.centerName || message.lead?.clientName ? ` · ${message.lead.centerName || message.lead.clientName}` : ''}`} · {message.createdBy?.name || 'Master Admin'} · {new Date(message.createdAt).toLocaleString('en-ZA')}</p></div>
                     </div>
                     {unread && <button className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-50 sm:ml-12" onClick={() => markAsRead(message)} type="button"><Check size={14} /> Mark read</button>}
                   </div>

@@ -52,6 +52,7 @@ app.use('/api/withdrawals', require('./routes/withdrawalRoutes'));
 app.use('/api/tickets', require('./routes/ticketRoutes'));
 app.use('/api/messages', require('./routes/messageRoutes'));
 app.use('/api/statements', require('./routes/statementRoutes'));
+app.use('/api/invoices', require('./routes/invoiceRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
 
 app.get('/api/health', (req, res) => {

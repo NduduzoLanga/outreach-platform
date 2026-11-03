@@ -33,7 +33,7 @@ const getStatementSummary = async (req, res) => {
         .populate('lead', 'clientName centerName principalName dealPackage')
         .sort({ createdAt: -1 }),
       LedgerEntry.find({ consultant: userId, type: 'income_assigned', createdAt: periodFilter })
-        .select('lead amount assignmentReason createdAt')
+        .select('lead amount incentiveType assignmentReason createdAt')
         .populate('lead', 'clientName centerName principalName dealPackage')
         .sort({ createdAt: -1 }),
       Withdrawal.find({ consultant: userId, createdAt: periodFilter }).sort({ createdAt: -1 }),

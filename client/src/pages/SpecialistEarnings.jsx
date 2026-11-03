@@ -3,8 +3,15 @@ import { useQuery } from '@tanstack/react-query';
 import { BadgeDollarSign, Wallet } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import API from '../services/api';
+import PaymentInvoices from '../components/PaymentInvoices';
 
 const currency = (amount) => `R${Number(amount || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}`;
+const paymentTypeLabels = {
+  referral_additional_incentive: 'Referral additional incentive',
+  performance_based_incentive: 'Performance-based incentive',
+  gratuity_incentive: 'Gratuity incentive',
+  salary: 'Salary',
+};
 
 export default function SpecialistEarnings() {
   const { user, setUser } = useAuth();
@@ -32,11 +39,12 @@ export default function SpecialistEarnings() {
         <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex items-center justify-between"><p className="text-sm font-medium text-slate-600">Income credits listed</p><BadgeDollarSign className="text-institute-forest" size={20} /></div><p className="mt-3 text-3xl font-bold text-emerald-700">{currency(total)}</p><p className="mt-2 text-xs text-slate-500">{entries.length} recorded credit{entries.length === 1 ? '' : 's'} in the latest 100 ledger entries</p></article>
       </div>
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <header className="border-b border-slate-200 bg-slate-50 px-5 py-4"><h2 className="font-bold text-slate-900">Income history</h2><p className="mt-1 text-sm text-slate-600">Credits are tied to the closed-won lead that generated them.</p></header>
+        <header className="border-b border-slate-200 bg-slate-50 px-5 py-4"><h2 className="font-bold text-slate-900">Income history</h2><p className="mt-1 text-sm text-slate-600">Review automatic deal commissions and additional payments assigned by the Master Admin.</p></header>
         {ledgerQuery.isLoading ? <p className="p-8 text-center text-sm text-slate-500">Loading income history...</p> : entries.length === 0 ? <p className="p-8 text-center text-sm text-slate-500">No income credits have been assigned yet.</p> : (
-          <div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-sm"><thead className="border-b border-slate-200 bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-4">Credited</th><th className="p-4">Lead</th><th className="p-4">Credit type</th><th className="p-4">Amount</th><th className="p-4">Available after</th></tr></thead><tbody className="divide-y divide-slate-100">{entries.map((entry) => <tr key={entry._id}><td className="p-4 text-slate-600">{new Date(entry.createdAt).toLocaleDateString('en-ZA')}</td><td className="p-4 font-medium text-slate-900">{entry.lead?.clientName || 'Lead record'}</td><td className="p-4 text-slate-600">{entry.type === 'income_assigned' ? 'Admin-assigned bonus' : 'Commission'}</td><td className="p-4 font-semibold text-emerald-700">{currency(entry.amount)}</td><td className="p-4 text-slate-700">{currency(entry.availableBalanceAfter)}</td></tr>)}</tbody></table></div>
+          <div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-sm"><thead className="border-b border-slate-200 bg-slate-100 text-xs uppercase text-slate-600"><tr><th className="p-4">Credited</th><th className="p-4">Lead / reference</th><th className="p-4">Credit type</th><th className="p-4">Amount</th><th className="p-4">Available after</th></tr></thead><tbody className="divide-y divide-slate-100">{entries.map((entry) => <tr key={entry._id}><td className="p-4 text-slate-600">{new Date(entry.createdAt).toLocaleDateString('en-ZA')}</td><td className="p-4 font-medium text-slate-900">{entry.lead?.clientName || entry.lead?.centerName || (entry.type === 'income_assigned' ? 'General payment' : 'Lead record')}</td><td className="p-4 text-slate-600">{entry.type === 'income_assigned' ? paymentTypeLabels[entry.incentiveType] || 'Admin-assigned payment' : 'Automatic deal commission'}{entry.assignmentReason && <span className="mt-1 block text-xs text-slate-500">{entry.assignmentReason}</span>}</td><td className="p-4 font-semibold text-emerald-700">{currency(entry.amount)}</td><td className="p-4 text-slate-700">{currency(entry.availableBalanceAfter)}</td></tr>)}</tbody></table></div>
         )}
       </section>
+      <PaymentInvoices />
     </section>
   );
 }

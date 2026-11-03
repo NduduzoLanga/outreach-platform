@@ -10,6 +10,9 @@ const { toCurrency } = require('../services/money');
 const { calculatePackageCommission } = require('../services/commissionPackages');
 const { createGoogleMeetEvent, updateGoogleMeetEvent } = require('../services/googleCalendarService');
 const {
+  createPaymentInvoice,
+} = require('../services/paymentInvoiceService');
+const {
   PIPELINE_STAGES,
   getLegacyStageFromPipeline,
   getPipelineStageFromLegacy,
@@ -566,7 +569,7 @@ const updateLead = async (req, res) => {
           const balanceBefore = toCurrency(consultant.balance - commission);
           consultant.balance = toCurrency(consultant.balance);
           await consultant.save({ session });
-          await LedgerEntry.create([{
+          const [commissionEntry] = await LedgerEntry.create([{
             tenantId: req.tenantId,
             consultant: consultant._id,
             lead: lead._id,
@@ -576,6 +579,15 @@ const updateLead = async (req, res) => {
             availableBalanceBefore: balanceBefore,
             availableBalanceAfter: consultant.balance,
           }], { session });
+          await createPaymentInvoice({
+            req,
+            session,
+            entry: commissionEntry,
+            recipient: consultant,
+            lead,
+            paymentType: 'commission_earned',
+            description: `${selectedCommission.packageLabel} commission for closed-won deal.`,
+          });
           await writeAuditLog({
             req,
             action: 'lead.commission_credited',

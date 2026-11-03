@@ -38,7 +38,7 @@ export default function Statements() {
       ['Closed won', summary.metrics?.closedWonCount ?? 0],
       ['Estimated value of leads captured', formatCurrency(summary.metrics?.totalPipelineValue)],
       ['Commission earned', formatCurrency(summary.metrics?.totalCommissionEarned)],
-      ['Additional income bonuses', formatCurrency(summary.metrics?.additionalIncomeAssigned)],
+      ['Additional assigned income', formatCurrency(summary.metrics?.additionalIncomeAssigned)],
       ['Total withdrawals requested', formatCurrency(summary.metrics?.totalWithdrawalsRequested)],
       ['Total paid out', formatCurrency(summary.metrics?.totalPaidOut)],
       ['Current balance', formatCurrency(summary.consultant?.currentBalance)],
@@ -249,10 +249,10 @@ export default function Statements() {
                   <tr><th className="p-3">Date credited</th><th className="p-3">Referral</th><th className="p-3">Credit type</th><th className="p-3">Package / reason</th><th className="p-3">Amount</th></tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
-                  {[...(summary.commissionEntries || []).map((entry) => ({ ...entry, creditType: 'Automatic commission' })), ...(summary.additionalIncomeEntries || []).map((entry) => ({ ...entry, creditType: 'Additional bonus' }))].sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt)).map((entry) => (
+                  {[...(summary.commissionEntries || []).map((entry) => ({ ...entry, creditType: 'Automatic commission' })), ...(summary.additionalIncomeEntries || []).map((entry) => ({ ...entry, creditType: ({ referral_additional_incentive: 'Referral additional incentive', performance_based_incentive: 'Performance-based incentive', gratuity_incentive: 'Gratuity incentive', salary: 'Salary' })[entry.incentiveType] || 'Admin-assigned payment' }))].sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt)).map((entry) => (
                     <tr key={entry._id}>
                       <td className="p-3">{new Date(entry.createdAt).toLocaleDateString('en-ZA')}</td>
-                      <td className="p-3">{entry.lead?.principalName || entry.lead?.clientName || 'Lead record unavailable'}</td>
+                      <td className="p-3">{entry.lead?.principalName || entry.lead?.clientName || entry.lead?.centerName || (entry.type === 'income_assigned' ? 'General payment' : 'Lead record unavailable')}</td>
                       <td className="p-3">{entry.creditType}</td>
                       <td className="p-3">{entry.assignmentReason || formatPackage(entry.lead?.dealPackage)}</td>
                       <td className="p-3 font-semibold">{formatCurrency(entry.amount)}</td>

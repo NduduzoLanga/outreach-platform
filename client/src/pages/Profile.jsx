@@ -104,7 +104,7 @@ export default function Profile() {
       <header className="rounded-2xl bg-gradient-to-br from-slate-950 via-institute-deep to-institute-forest p-6 text-white shadow-sm sm:p-8">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200">Account settings</p>
         <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
-          <div><h1 className="text-3xl font-bold tracking-tight">Your profile</h1><p className="mt-2 text-sm text-slate-200">{roleLabel} · {user?.email}</p></div>
+          <div><h1 className="text-3xl font-bold tracking-tight">Your profile</h1><p className="mt-2 text-sm text-slate-200">{roleLabel} · {user?.email}</p>{user?.employeeId && <p className="mt-1 text-xs font-semibold tracking-wide text-emerald-200">Employee ID · {user.employeeId}</p>}</div>
           <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-semibold capitalize">{(user?.accountStatus || 'active').replaceAll('_', ' ')}</span>
         </div>
         <div className="mt-5 max-w-md">
